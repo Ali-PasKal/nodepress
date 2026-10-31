@@ -3,22 +3,35 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { PRISMA_CLI } from '../helpers/prisma-cli.js';
 import { TEST_DATABASE_URL } from '../helpers/test-env.js';
 
 const run = promisify(execFile);
 const apiRoot = fileURLToPath(new URL('../..', import.meta.url));
 
-/** Runs the same drift check CI uses: diff the migrated database against schema.prisma. */
+/** Runs the same drift check as `pnpm run db:check-drift`: diff the migrated database against schema.prisma. */
 async function driftExitCode(): Promise<number> {
   try {
-    await run('pnpm', ['run', '--silent', 'db:check-drift'], {
-      cwd: apiRoot,
-      env: {
-        ...process.env,
-        DATABASE_URL: TEST_DATABASE_URL,
-        MIGRATION_DATABASE_URL: TEST_DATABASE_URL,
+    await run(
+      process.execPath,
+      [
+        PRISMA_CLI,
+        'migrate',
+        'diff',
+        '--from-config-datasource',
+        '--to-schema',
+        'prisma/schema.prisma',
+        '--exit-code',
+      ],
+      {
+        cwd: apiRoot,
+        env: {
+          ...process.env,
+          DATABASE_URL: TEST_DATABASE_URL,
+          MIGRATION_DATABASE_URL: TEST_DATABASE_URL,
+        },
       },
-    });
+    );
     return 0;
   } catch (error) {
     return (error as { code?: number }).code ?? -1;

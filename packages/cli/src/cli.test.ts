@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { parseCommandLine } from './args.ts';
 import { endpointOf, satisfiesMinimum } from './commands/doctor.ts';
 import { isMigrateAction } from './commands/migrate.ts';
+import { resolveCommand } from './process.ts';
 
 const BIN = fileURLToPath(new URL('../bin/nexora.js', import.meta.url));
 
@@ -84,5 +85,60 @@ describe('binary', () => {
     const result = spawnSync(process.execPath, [BIN, 'create', 'plugin'], { encoding: 'utf8' });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Unknown command "create"/);
+  });
+});
+
+describe('resolveCommand (cross-platform process launching)', () => {
+  it('runs pnpm through Node using npm_execpath, without a shell', () => {
+    const resolved = resolveCommand(
+      'pnpm',
+      ['run', 'build'],
+      { npm_execpath: '/opt/pnpm/bin/pnpm.cjs' },
+      'win32',
+    );
+    assert.deepEqual(resolved, {
+      command: process.execPath,
+      args: ['/opt/pnpm/bin/pnpm.cjs', 'run', 'build'],
+      shell: false,
+    });
+  });
+
+  it('runs a standalone pnpm executable directly', () => {
+    const resolved = resolveCommand(
+      'pnpm',
+      ['test'],
+      { npm_execpath: 'C:\\pnpm\\pnpm.exe' },
+      'win32',
+    );
+    assert.deepEqual(resolved, { command: 'C:\\pnpm\\pnpm.exe', args: ['test'], shell: false });
+  });
+
+  it('falls back to the pnpm.cmd shim through a shell only on Windows', () => {
+    assert.deepEqual(resolveCommand('pnpm', ['test'], {}, 'win32'), {
+      command: 'pnpm.cmd',
+      args: ['test'],
+      shell: true,
+    });
+    assert.deepEqual(resolveCommand('pnpm', ['test'], {}, 'linux'), {
+      command: 'pnpm',
+      args: ['test'],
+      shell: false,
+    });
+  });
+
+  it('leaves other commands untouched', () => {
+    assert.deepEqual(resolveCommand('docker', ['compose', 'version'], {}, 'win32'), {
+      command: 'docker',
+      args: ['compose', 'version'],
+      shell: false,
+    });
+  });
+
+  it('rejects unsafe migration names', () => {
+    const result = spawnSync(process.execPath, [BIN, 'migrate', 'dev', '--name', 'x & del /q *'], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /letters, digits and underscores/);
   });
 });

@@ -2,6 +2,8 @@ import { effectiveEnv, readEnvFile } from '../env-file.ts';
 import { fail, heading } from '../output.ts';
 import { run } from '../process.ts';
 
+const MIGRATION_NAME = /^[A-Za-z0-9_]{1,100}$/;
+
 export const MIGRATE_ACTIONS = ['deploy', 'status', 'dev', 'reset', 'check'] as const;
 export type MigrateAction = (typeof MIGRATE_ACTIONS)[number];
 
@@ -36,6 +38,9 @@ export async function migrate(
       heading('Checking that the database schema matches schema.prisma');
       return run('pnpm', ['--filter', '@nexora/api', 'run', 'db:check-drift']);
     case 'dev': {
+      if (options.name !== undefined && !MIGRATION_NAME.test(options.name)) {
+        fail('Migration names may only contain letters, digits and underscores (e.g. add_users).');
+      }
       heading('Creating a new migration from schema.prisma changes');
       const args = prisma('migrate', 'dev');
       if (options.name) {

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { PRISMA_CLI } from './helpers/prisma-cli.js';
 import { assertDisposableTestDatabase, TEST_DATABASE_URL } from './helpers/test-env.js';
 
 const apiRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -28,7 +29,7 @@ export default async function setup(): Promise<void> {
     await client.end();
   }
 
-  execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
+  execFileSync(process.execPath, [PRISMA_CLI, 'migrate', 'deploy'], {
     cwd: apiRoot,
     env: {
       ...process.env,

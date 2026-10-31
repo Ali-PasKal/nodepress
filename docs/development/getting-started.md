@@ -39,6 +39,15 @@ Useful URLs while `nexora dev` is running:
 - API readiness: <http://localhost:3000/api/v1/health/ready>
 - API docs (Swagger UI): <http://localhost:3000/api/docs/> (the raw document is at `/api/docs/openapi.json`)
 
+## Windows
+
+The toolchain works on Windows 10/11 (PowerShell) with Docker Desktop:
+
+- Install Node.js ≥ 22.22 and Git, then run `corepack enable` once from an **administrator** PowerShell so the pinned pnpm version is used.
+- Always invoke the CLI as `pnpm nexora …` (pnpm passes its own location to the CLI, so no shell or `.cmd` shim is needed).
+- Clone after installing Git with default settings; `.gitattributes` keeps LF line endings in the working tree.
+- If a local PostgreSQL Windows service already uses port 5432, either stop it or set `POSTGRES_PORT` (and the port in `DATABASE_URL`) in `.env`.
+
 ## CLI reference
 
 Every command below is implemented in `packages/cli`. Run `pnpm nexora help` for the same list.

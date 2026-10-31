@@ -1,0 +1,8 @@
+# Keep LF line endings in the working tree on every platform (Prettier enforces "endOfLine": "lf";
+# without this, Git on Windows would check files out with CRLF and formatting checks would fail).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
