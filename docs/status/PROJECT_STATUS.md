@@ -166,7 +166,7 @@ authentication existed and every endpoint was public.
 | 9 | Reset tokens single-use, expiring, stored hashed, and revoke sessions when used | ✅ `password-reset.test.ts`; E2E `account.spec.ts` follows a real emailed link |
 | 10 | Audit events in the same transaction; rows cannot be updated or deleted by the application | ✅ `audit.test.ts` (including the trigger rejecting UPDATE/DELETE and no secrets in metadata) |
 | 11 | Admin UI against the real API, with loading/empty/error states, confirmations, keyboard-accessible dialogs, responsive at 375/768/1280 | ✅ 50 Vitest/RTL tests; Playwright suite on desktop, tablet and mobile projects |
-| 12 | All checks pass on Node 22 and Node 23.7; CI green | ✅ Node 22 and Node 23.7 locally (below); CI: see "Known limitations" |
+| 12 | All checks pass on Node 22 and Node 23.7; CI green | ✅ Node 22 and Node 23.7 locally (below); GitHub CI run #9: all six jobs green |
 
 ### Verification run (2026-10-31, local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16.15, Redis 7)
 
@@ -245,7 +245,7 @@ Issues found and fixed during M2 verification:
   Secure cookies on `localhost`/`127.0.0.1`, so it works locally, but any real deployment must terminate TLS
   in front of it; otherwise sign-in cookies are rejected.
 - Local tests ran against PostgreSQL 16; CI and Compose use 17.
-- **GitHub CI:** pending at the time of writing; this line is updated once the run for the M2 push finishes.
+- **GitHub CI:** run #9 (commit `d4dce53`) passed all six jobs: lint/format/typecheck/build/bundle budget, unit + integration + drift + E2E, Node 23.7.0 and 24 compatibility, dependency audit, container images.
 
 ### Security considerations for M2
 Controls implemented in M2 and residual risks R-09…R-13 are listed in
