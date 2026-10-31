@@ -43,7 +43,9 @@ Useful URLs while `nexora dev` is running:
 
 The toolchain works on Windows 10/11 (PowerShell) with Docker Desktop:
 
-- Install Node.js ≥ 22.22 and Git, then run `corepack enable` once from an **administrator** PowerShell so the pinned pnpm version is used.
+- Install the **64-bit (x64)** Node.js ≥ 22.22 installer, not the 32-bit one: Tailwind, lightningcss and Vite's bundler ship no 32-bit Windows binaries. Check with `node -p "process.arch"` (must print `x64` or `arm64`).
+- Install pnpm: `npm install -g pnpm@10.28.0` (no administrator rights needed), or `corepack enable` from an **administrator** PowerShell. Do not use `npm install` in the repository: npm does not support pnpm's `workspace:` protocol.
+- If PowerShell refuses to run `pnpm` ("running scripts is disabled on this system"), run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or call `pnpm.cmd` instead.
 - Always invoke the CLI as `pnpm nexora …` (pnpm passes its own location to the CLI, so no shell or `.cmd` shim is needed).
 - Clone after installing Git with default settings; `.gitattributes` keeps LF line endings in the working tree.
 - If a local PostgreSQL Windows service already uses port 5432, either stop it or set `POSTGRES_PORT` (and the port in `DATABASE_URL`) in `.env`.

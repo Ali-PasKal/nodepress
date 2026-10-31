@@ -23,7 +23,10 @@ TypeScript, NestJS, PostgreSQL and React.
 
 ## Quick start
 
-Requirements: Node.js ≥ 22.22, pnpm ≥ 10.28, and Docker (optional, for PostgreSQL and Valkey).
+Requirements: **64-bit** Node.js ≥ 22.22, pnpm ≥ 10.28, and Docker (optional, for PostgreSQL and Valkey).
+
+> Use **pnpm**, not npm: this is a pnpm workspace, and `npm install` fails with
+> `Unsupported URL Type "workspace:"`. Install pnpm with `npm install -g pnpm@10.28.0` (or `corepack enable`).
 
 ```bash
 pnpm install
