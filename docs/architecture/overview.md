@@ -134,18 +134,19 @@ Rules:
 ### 4.3 Cross-cutting request pipeline (M1)
 
 ```
-Node HTTP server (headers/request timeouts)
- → trust-proxy resolution
- → pino-http (request id, structured access log, header redaction)
+Node HTTP server (headers/request timeouts; trust-proxy resolution for req.ip)
+ → request id (generated; inbound X-Request-Id only if TRUST_REQUEST_ID_HEADER and well-formed)
  → helmet (per-route CSP: API = `default-src 'none'`; docs UI = self-only)
- → CORS allowlist (empty by default ⇒ same-origin only)
- → body parsers with size limits (413 on excess)
+ → Cache-Control: no-store
+ → CORS (only for allowlisted origins; none configured ⇒ same-origin only)
+ → JSON body parser with size limit (413 on excess)
  → Nest router (URI versioning: /api/v1/…)
- → [M2] authentication guard → capability guard → CSRF guard for cookie-authenticated mutations
- → [M2] Zod validation pipe
- → controller → application service
- → timeout interceptor (503 after REQUEST_TIMEOUT_MS)
- → global exception filter (uniform error envelope, no stack traces or internals outside development)
+   → pino-http access log (request id, method, path without query, status; credentials redacted)
+   → [M2] authentication guard → capability guard → CSRF guard for cookie-authenticated mutations
+   → [M2] Zod validation pipe
+   → timeout interceptor (503 REQUEST_TIMEOUT after REQUEST_TIMEOUT_MS)
+   → controller → application service
+   → global exception filter (uniform error envelope; never stack traces or internals; DB unavailable ⇒ 503)
 ```
 
 ## 5. Authentication and authorisation (target design, M2)
