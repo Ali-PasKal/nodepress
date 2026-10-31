@@ -13,22 +13,64 @@ export interface CheckResult {
   readonly detail: string;
 }
 
-/** Compares dotted numeric versions: returns true if `actual` >= `minimum`. */
-export function satisfiesMinimum(actual: string, minimum: string): boolean {
-  const parse = (value: string) =>
-    value
-      .replace(/^v/, '')
-      .split('.')
-      .map((part) => Number.parseInt(part, 10) || 0);
-  const a = parse(actual);
-  const m = parse(minimum);
-  for (let index = 0; index < Math.max(a.length, m.length); index += 1) {
-    const difference = (a[index] ?? 0) - (m[index] ?? 0);
-    if (difference !== 0) {
-      return difference > 0;
-    }
+type Version = readonly [number, number, number];
+
+function parseVersion(value: string): Version | null {
+  const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(value.trim());
+  if (!match) {
+    return null;
   }
-  return true;
+  return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)];
+}
+
+function compareVersions(a: Version, b: Version): number {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+
+/**
+ * Minimal semver range check for the syntax used in `engines` fields: alternatives separated by `||`,
+ * each a space-separated list of comparators (`^x.y.z`, `>=`, `>`, `<=`, `<`, `=` or a bare version).
+ * Unknown syntax never matches, so a malformed range fails loudly instead of passing silently.
+ */
+export function satisfiesRange(version: string, range: string): boolean {
+  const actual = parseVersion(version);
+  if (actual === null) {
+    return false;
+  }
+  return range.split('||').some((alternative) => {
+    const comparators = alternative
+      .trim()
+      .split(/\s+/)
+      .filter((part) => part.length > 0);
+    return (
+      comparators.length > 0 &&
+      comparators.every((comparator) => satisfiesComparator(actual, comparator))
+    );
+  });
+}
+
+function satisfiesComparator(actual: Version, comparator: string): boolean {
+  const match = /^(\^|>=|<=|>|<|=)?(v?\d+(?:\.\d+){0,2})$/.exec(comparator);
+  const target = match?.[2] === undefined ? null : parseVersion(match[2]);
+  if (!match || target === null) {
+    return false;
+  }
+  const order = compareVersions(actual, target);
+  switch (match[1]) {
+    case '^':
+      // ^X.Y.Z (X > 0): at least X.Y.Z, below the next major version.
+      return order >= 0 && actual[0] === target[0];
+    case '>=':
+      return order >= 0;
+    case '>':
+      return order > 0;
+    case '<=':
+      return order <= 0;
+    case '<':
+      return order < 0;
+    default:
+      return order === 0;
+  }
 }
 
 /** Extracts host and port from a service URL, applying the protocol's default port. */
@@ -101,11 +143,14 @@ export async function runDoctorChecks(): Promise<CheckResult[]> {
   const rootPackage = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
     engines: { node: string };
   };
-  const minimumNode = rootPackage.engines.node.replace(/^>=\s*/, '');
+  const supportedNode = rootPackage.engines.node;
+  const nodeSupported = satisfiesRange(process.versions.node, supportedNode);
   results.push({
     name: 'Node.js',
-    level: satisfiesMinimum(process.versions.node, minimumNode) ? 'ok' : 'fail',
-    detail: `${process.versions.node} (requires >= ${minimumNode})`,
+    level: nodeSupported ? 'ok' : 'fail',
+    detail: nodeSupported
+      ? `${process.versions.node} (supported: ${supportedNode})`
+      : `${process.versions.node} is not supported (${supportedNode}); install the LTS version in .nvmrc`,
   });
 
   results.push({

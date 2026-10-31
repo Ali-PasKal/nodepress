@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parseCommandLine } from './args.ts';
-import { endpointOf, satisfiesMinimum } from './commands/doctor.ts';
+import { endpointOf, satisfiesRange } from './commands/doctor.ts';
 import { isMigrateAction } from './commands/migrate.ts';
 import { resolveCommand } from './process.ts';
 
@@ -29,11 +30,31 @@ describe('parseCommandLine', () => {
 });
 
 describe('doctor helpers', () => {
-  it('compares versions', () => {
-    assert.equal(satisfiesMinimum('22.23.4', '22.22.0'), true);
-    assert.equal(satisfiesMinimum('v22.22.0', '22.22.0'), true);
-    assert.equal(satisfiesMinimum('22.9.0', '22.22.0'), false);
-    assert.equal(satisfiesMinimum('24.0.0', '22.22.0'), true);
+  it('evaluates engines ranges like the root package.json uses', () => {
+    const range = '^22.22.2 || ^24.15.0 || >=26.0.0';
+    for (const ok of ['22.22.2', 'v22.23.4', '24.15.0', '24.20.1', '26.0.0', '27.1.0']) {
+      assert.equal(satisfiesRange(ok, range), true, ok);
+    }
+    for (const bad of ['22.22.1', '22.9.0', '23.7.0', '24.14.9', '25.2.0', '20.19.0']) {
+      assert.equal(satisfiesRange(bad, range), false, bad);
+    }
+  });
+
+  it('supports comparator sets and rejects malformed input', () => {
+    assert.equal(satisfiesRange('18.5.0', '>=18 <20'), true);
+    assert.equal(satisfiesRange('20.0.0', '>=18 <20'), false);
+    assert.equal(satisfiesRange('22.0.0', '22.0.0'), true);
+    assert.equal(satisfiesRange('22.0.0', 'latest'), false);
+    assert.equal(satisfiesRange('not-a-version', '>=1'), false);
+  });
+
+  it('matches the Node.js range declared in the root package.json', () => {
+    const root = JSON.parse(
+      readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
+    ) as {
+      engines: { node: string };
+    };
+    assert.equal(satisfiesRange(process.versions.node, root.engines.node), true);
   });
 
   it('extracts service endpoints with default ports', () => {

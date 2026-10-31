@@ -250,7 +250,7 @@ migrations and registration inside a transaction and records a lifecycle state m
 
 | Area | Choice | Note |
 |---|---|---|
-| Runtime | Node.js ≥ 22.22, pnpm 10 workspaces | Required by React Router 8 / Vite 8 |
+| Runtime | Node.js 22 LTS (≥ 22.22.2) or 24 LTS (≥ 24.15), pnpm 10 workspaces | Intersection of all dependencies' `engines` |
 | Language | TypeScript 6.0 (strict) | TS 7 is not yet supported by typescript-eslint |
 | API | NestJS 12 (ESM) on Express 5 | URI-versioned REST, OpenAPI via `@nestjs/swagger` |
 | ORM | Prisma 7 + `@prisma/adapter-pg` | Rust-free client, generated into the API source tree |
