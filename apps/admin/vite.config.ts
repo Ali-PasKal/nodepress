@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
-import { ADMIN_SECURITY_HEADERS } from './security-headers';
+import { ADMIN_SECURITY_HEADERS } from './security-headers.ts';
 
 // The admin is served under /admin/ and talks to the API on the same origin (/api). During
 // development and preview, Vite proxies /api to the API process.
