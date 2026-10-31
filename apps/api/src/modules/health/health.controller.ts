@@ -12,9 +12,11 @@ import {
   type ReadinessResponse,
 } from '@nexora/shared';
 import type { Response } from 'express';
+import { Public } from '../security/decorators.js';
 import { HealthService } from './health.service.js';
 
 @ApiTags('health')
+@Public()
 @Controller({ path: 'health', version: '1' })
 export class HealthController {
   constructor(private readonly health: HealthService) {}

@@ -20,7 +20,6 @@ import {
   CircleX,
   Database,
   GitBranch,
-  Info,
   Layers,
   RefreshCw,
   Server,
@@ -29,7 +28,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '../../components/page-header';
 import { ApiError } from '../../lib/api-client';
-import { useReadiness, useSystemStatus } from './api';
+import { useReadiness } from './api';
 import { describeComponents, describeOverall, type ComponentView, type Tone } from './status-model';
 
 const TONE_ICON: Record<Tone, LucideIcon> = {
@@ -55,8 +54,7 @@ const COMPONENT_ICON: Record<ComponentView['id'], LucideIcon> = {
 
 export function SystemStatusPage() {
   const readiness = useReadiness();
-  const status = useSystemStatus();
-  const refreshing = readiness.isFetching || status.isFetching;
+  const refreshing = readiness.isFetching;
 
   return (
     <div className="flex flex-col gap-6">
@@ -68,7 +66,6 @@ export function SystemStatusPage() {
             variant="outline"
             onClick={() => {
               void readiness.refetch();
-              void status.refetch();
             }}
             disabled={refreshing}
           >
@@ -77,32 +74,9 @@ export function SystemStatusPage() {
           </Button>
         }
       />
-      <InstallationNotice query={status} />
       <ReadinessSection query={readiness} />
     </div>
   );
-}
-
-function InstallationNotice({ query }: { query: UseQueryResult<{ installed: boolean }> }) {
-  if (query.data?.installed === false) {
-    return (
-      <Alert tone="warning">
-        <Info aria-hidden="true" />
-        <div>
-          <AlertTitle>Initial setup has not been completed</AlertTitle>
-          <AlertDescription>
-            <p>
-              No administrator account exists for this instance yet. Setup depends on the
-              authentication module, which is not included in this build, so the dashboard is
-              currently limited to system monitoring.
-            </p>
-          </AlertDescription>
-        </div>
-      </Alert>
-    );
-  }
-  // Errors here are covered by the readiness section, which reports API/database availability.
-  return null;
 }
 
 function ReadinessSection({ query }: { query: UseQueryResult<ReadinessResponse> }) {

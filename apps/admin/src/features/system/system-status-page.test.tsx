@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readiness } from '../../test/fixtures';
+import { readiness, sessionFixture } from '../../test/fixtures';
 import { json, mockFetch, renderAdmin } from '../../test/render';
 
 const realFetch = globalThis.fetch;
@@ -12,12 +12,12 @@ afterEach(() => {
 describe('System status page', () => {
   it('shows a loading state, then live component status from the API', async () => {
     mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
       '/api/v1/health/ready': () => json(readiness()),
       '/api/v1/system/status': () => json({ installed: true }),
     });
     renderAdmin('/system/status');
 
-    expect(screen.getByRole('status')).toHaveTextContent('Checking system status…');
     expect(
       await screen.findByRole('heading', { name: 'All systems operational' }),
     ).toBeInTheDocument();
@@ -32,8 +32,19 @@ describe('System status page', () => {
     expect(document.title).toBe('System status · NEXORA CMS');
   });
 
+  it('shows a loading state while readiness is being checked', async () => {
+    mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
+      '/api/v1/system/status': () => json({ installed: true }),
+      '/api/v1/health/ready': () => new Promise<Response>(() => undefined),
+    });
+    renderAdmin('/system/status');
+    expect(await screen.findByText('Checking system status…')).toBeInTheDocument();
+  });
+
   it('renders an unready instance from a 503 readiness response', async () => {
     mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
       '/api/v1/health/ready': () =>
         json(
           readiness({
@@ -53,15 +64,6 @@ describe('System status page', () => {
     expect(screen.getByText('1 pending — run "nexora migrate deploy"')).toBeInTheDocument();
   });
 
-  it('tells the operator when setup has not been completed', async () => {
-    mockFetch({
-      '/api/v1/health/ready': () => json(readiness()),
-      '/api/v1/system/status': () => json({ installed: false }),
-    });
-    renderAdmin('/system/status');
-    expect(await screen.findByText('Initial setup has not been completed')).toBeInTheDocument();
-  });
-
   it('shows an actionable error when the API is unreachable and recovers on retry', async () => {
     let apiUp = false;
     globalThis.fetch = (input: RequestInfo | URL) => {
@@ -69,6 +71,9 @@ describe('System status page', () => {
         return Promise.reject(new TypeError('Failed to fetch'));
       }
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/auth/session')) {
+        return Promise.resolve(json(sessionFixture()));
+      }
       return Promise.resolve(
         url.endsWith('/health/ready') ? json(readiness()) : json({ installed: true }),
       );
@@ -87,6 +92,7 @@ describe('System status page', () => {
 
   it('shows the request id for API errors so operators can correlate logs', async () => {
     mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
       '/api/v1/health/ready': () =>
         json(
           {
@@ -109,6 +115,7 @@ describe('System status page', () => {
   it('refetches when Refresh is pressed', async () => {
     let calls = 0;
     mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
       '/api/v1/health/ready': () => {
         calls += 1;
         return json(readiness());
@@ -127,6 +134,7 @@ describe('System status page', () => {
 describe('Routing and layout', () => {
   it('redirects the dashboard root to system status and marks the nav item active', async () => {
     mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
       '/api/v1/health/ready': () => json(readiness()),
       '/api/v1/system/status': () => json({ installed: true }),
     });
@@ -144,6 +152,10 @@ describe('Routing and layout', () => {
   });
 
   it('shows a not-found page for unknown routes', async () => {
+    mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
+      '/api/v1/system/status': () => json({ installed: true }),
+    });
     renderAdmin('/does/not/exist');
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Page not found' }),
@@ -154,9 +166,13 @@ describe('Routing and layout', () => {
     );
   });
 
-  it('provides a skip link to the main content', () => {
+  it('provides a skip link to the main content', async () => {
+    mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
+      '/api/v1/system/status': () => json({ installed: true }),
+    });
     renderAdmin('/does/not/exist');
-    expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Skip to content' })).toHaveAttribute(
       'href',
       '#main-content',
     );

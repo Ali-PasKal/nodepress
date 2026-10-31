@@ -3,6 +3,7 @@ import { parseCommandLine } from './args.ts';
 import { dev } from './commands/dev.ts';
 import { doctor } from './commands/doctor.ts';
 import { migrate } from './commands/migrate.ts';
+import { userCommand } from './commands/user.ts';
 import { color, fail } from './output.ts';
 import { run, runSteps } from './process.ts';
 
@@ -24,6 +25,9 @@ ${color.bold('Commands')}
                             check    fail if the database schema drifts from schema.prisma
                             dev      create a migration from schema changes [--name <name>]
                             reset    drop and recreate the database (requires --force)
+  user reset-password --email <email>
+                          Account recovery: set a temporary password for a user
+                          (signs them out everywhere; prints the password once)
   doctor                  Check Node, pnpm, Docker, .env, database and cache connectivity
   help                    Show this help
   version                 Print the CLI version
@@ -71,6 +75,8 @@ async function main(argv: readonly string[]): Promise<number> {
         force: flags.force,
         ...(flags.name === undefined ? {} : { name: flags.name }),
       });
+    case 'user':
+      return userCommand(positionals[0], flags.email);
     case 'doctor':
       return doctor();
     default:

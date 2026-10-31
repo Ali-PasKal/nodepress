@@ -21,6 +21,7 @@ const DEFAULT_MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
   VALIDATION_FAILED: 'The request contains invalid data.',
   UNAUTHENTICATED: 'Authentication is required.',
   FORBIDDEN: 'You do not have permission to perform this action.',
+  CSRF_FAILED: 'The request could not be verified. Reload the page and try again.',
   NOT_FOUND: 'The requested resource was not found.',
   METHOD_NOT_ALLOWED: 'This method is not allowed for the requested resource.',
   CONFLICT: 'The request conflicts with the current state of the resource.',

@@ -11,6 +11,16 @@ import { DatabaseModule } from './infrastructure/database/database.module.js';
 import { buildLoggerOptions } from './logging/logger-options.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { SystemModule } from './modules/system/system.module.js';
+import { AccountModule } from './modules/account/account.module.js';
+import { AuditModule } from './modules/audit/audit.module.js';
+import { AuthModule } from './modules/auth/auth.module.js';
+import { MailModule } from './modules/mail/mail.module.js';
+import { RolesModule } from './modules/roles/roles.module.js';
+import { SecurityModule } from './modules/security/security.module.js';
+import { SettingsModule } from './modules/settings/settings.module.js';
+import { SetupModule } from './modules/setup/setup.module.js';
+import { SitesModule } from './modules/sites/sites.module.js';
+import { UsersModule } from './modules/users/users.module.js';
 import { LifecycleModule } from './common/lifecycle/lifecycle.module.js';
 
 /**
@@ -31,8 +41,18 @@ export class AppModule {
         LifecycleModule,
         DatabaseModule,
         CacheModule,
+        SitesModule,
+        AuditModule,
+        MailModule,
+        SecurityModule,
         HealthModule,
         SystemModule,
+        SetupModule,
+        AuthModule,
+        AccountModule,
+        UsersModule,
+        RolesModule,
+        SettingsModule,
       ],
       providers: [
         { provide: APP_FILTER, useClass: GlobalExceptionFilter },

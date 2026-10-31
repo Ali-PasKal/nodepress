@@ -10,9 +10,11 @@ import {
   systemStatusResponseSchema,
   type SystemStatusResponse,
 } from '@nexora/shared';
+import { Public } from '../security/decorators.js';
 import { SystemService } from './system.service.js';
 
 @ApiTags('system')
+@Public()
 @Controller({ path: 'system', version: '1' })
 export class SystemController {
   constructor(private readonly system: SystemService) {}

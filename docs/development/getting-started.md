@@ -25,6 +25,23 @@ pnpm nexora dev
 3. builds `@nexora/shared` and applies database migrations;
 4. runs the API (`http://localhost:3000`, tsc watch + restart), the admin (`http://localhost:5173/admin/`, Vite) and the shared-contracts compiler in watch mode.
 
+### First sign-in: the setup wizard
+
+A fresh instance opens the **setup wizard** at <http://localhost:5173/admin/>. It asks for the site name, base URL,
+your administrator account and a **one-time setup token**, which the API prints at startup:
+
+```text
+NEXORA is not installed yet. Open /admin/setup and enter this one-time setup token: …
+```
+
+(Set `SETUP_TOKEN` in `.env` to choose it yourself.) Once installed, the wizard is permanently disabled.
+
+In development, password reset emails are written to the API log (`MAIL_TRANSPORT=log`); set
+`MAIL_TRANSPORT=file` to get one JSON file per email in `MAIL_FILE_DIR` instead.
+
+Locked out? `pnpm nexora user reset-password --email you@example.com` sets a temporary password (printed once)
+and signs the account out everywhere.
+
 Without Docker, provide PostgreSQL yourself, point `DATABASE_URL` at it, and run `pnpm nexora dev --no-infra`.
 
 Check your setup at any time:
@@ -72,6 +89,7 @@ Every command below is implemented in `packages/cli`. Run `pnpm nexora help` for
 | `nexora migrate check` | Fail if the database schema differs from `schema.prisma` (drift) |
 | `nexora migrate dev [--name x]` | Create a migration from `schema.prisma` changes (refused when `NODE_ENV=production`) |
 | `nexora migrate reset --force` | Drop and recreate the database (refused when `NODE_ENV=production`) |
+| `nexora user reset-password --email <email>` | Account recovery: temporary password, all sessions revoked, audited |
 | `nexora doctor` | Check Node, pnpm, Docker, `.env`, and database/cache connectivity |
 
 The equivalent root `package.json` scripts (`pnpm build`, `pnpm test`, `pnpm lint`, `pnpm typecheck`,
@@ -92,7 +110,7 @@ The equivalent root `package.json` scripts (`pnpm build`, `pnpm test`, `pnpm lin
 | Shared contracts, UI, admin (Vitest, jsdom) | `pnpm test` | — |
 | API unit + integration (Vitest + Supertest) | `pnpm test` | PostgreSQL; database `nexora_test` |
 | CLI (node:test) | `pnpm test` | — |
-| End-to-end (Playwright: desktop 1280, tablet 768, mobile 375) | `pnpm test:e2e` | PostgreSQL; builds and starts the API and admin itself |
+| End-to-end (Playwright: setup wizard, then desktop 1280, tablet 768, mobile 375) | `pnpm test:e2e` | PostgreSQL; **recreates** the `nexora_e2e` database, then builds and starts the API and admin |
 
 - API integration tests **recreate the `public` schema** of `TEST_DATABASE_URL` and refuse to run unless the database name ends in `_test`.
 - Set `TEST_REDIS_URL` to also run the cache integration test.

@@ -22,8 +22,196 @@ model SystemState {
   id               Int       @id @default(1) @db.SmallInt
   installedAt      DateTime? @map("installed_at") @db.Timestamptz(3)
   installedVersion String?   @map("installed_version") @db.VarChar(64)
+  /// SHA-256 of the one-time setup token; cleared when installation completes.
+  setupTokenHash   Bytes?    @map("setup_token_hash")
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("system_state")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Milestone 2: sites, identity, access control, audit, rate limiting
+// ---------------------------------------------------------------------------------------------
+
+/// A website managed by this instance. Exactly one ("default") exists until multi-site support lands;
+/// site-scoped data references it so tenancy can be added without a schema rewrite.
+model Site {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  key       String   @unique @db.VarChar(64)
+  name      String   @db.VarChar(200)
+  /// Public base URL (scheme + host [+ path]); used to build absolute links such as password resets.
+  baseUrl   String   @map("base_url") @db.VarChar(2048)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  roleAssignments RoleAssignment[]
+
+  @@map("sites")
+}
+
+enum UserStatus {
+  active
+  suspended
+
+  @@map("user_status")
+}
+
+model User {
+  id                String     @id @default(uuid(7)) @db.Uuid
+  /// Stored normalised (trimmed, lower-case); enforced by a CHECK constraint.
+  email             String     @unique @db.VarChar(320)
+  displayName       String     @map("display_name") @db.VarChar(120)
+  status            UserStatus @default(active)
+  lastLoginAt       DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  passwordChangedAt DateTime?  @map("password_changed_at") @db.Timestamptz(3)
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  credential          UserCredential?
+  sessions            Session[]
+  roleAssignments     RoleAssignment[]
+  passwordResetTokens PasswordResetToken[]
+  auditEvents         AuditEvent[]
+
+  @@index([status])
+  @@map("users")
+}
+
+/// Password hashes live apart from user rows so ordinary user queries can never select them.
+model UserCredential {
+  userId       String   @id @map("user_id") @db.Uuid
+  /// Argon2id PHC string.
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_credentials")
+}
+
+/// Server-side session. The cookie carries a random token; only its SHA-256 digest is stored.
+model Session {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  tokenHash     Bytes     @unique @map("token_hash")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt    DateTime  @map("last_seen_at") @db.Timestamptz(3)
+  /// Absolute expiry; idle expiry is derived from last_seen_at.
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revokedReason String?   @map("revoked_reason") @db.VarChar(64)
+  ipAddress     String?   @map("ip_address") @db.VarChar(64)
+  userAgent     String?   @map("user_agent") @db.VarChar(512)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Role {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  key         String   @unique @db.VarChar(64)
+  name        String   @db.VarChar(100)
+  description String   @default("") @db.VarChar(500)
+  /// Built-in roles cannot be deleted or renamed.
+  isSystem    Boolean  @default(false) @map("is_system")
+  /// Holds every capability, including ones registered later (Super Administrator).
+  grantsAll   Boolean  @default(false) @map("grants_all")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  capabilities RoleCapability[]
+  assignments  RoleAssignment[]
+
+  @@map("roles")
+}
+
+/// Registry of capabilities. Core capabilities are seeded by migrations; plugins add theirs (M6).
+model Capability {
+  key         String @id @db.VarChar(100)
+  category    String @db.VarChar(64)
+  description String @db.VarChar(300)
+
+  roles RoleCapability[]
+
+  @@map("capabilities")
+}
+
+model RoleCapability {
+  roleId        String @map("role_id") @db.Uuid
+  capabilityKey String @map("capability_key") @db.VarChar(100)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  capability Capability @relation(fields: [capabilityKey], references: [key], onDelete: Cascade)
+
+  @@id([roleId, capabilityKey])
+  @@index([capabilityKey])
+  @@map("role_capabilities")
+}
+
+/// One role per user per site.
+model RoleAssignment {
+  userId    String   @map("user_id") @db.Uuid
+  siteId    String   @map("site_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, siteId])
+  @@index([roleId])
+  @@map("role_assignments")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash Bytes     @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+/// Append-only security audit trail. UPDATE and DELETE are rejected by a database trigger.
+model AuditEvent {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  action      String   @db.VarChar(100)
+  /// Users are never hard-deleted while audit events reference them (RESTRICT keeps the trail intact).
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  targetType  String?  @map("target_type") @db.VarChar(64)
+  targetId    String?  @map("target_id") @db.VarChar(64)
+  ipAddress   String?  @map("ip_address") @db.VarChar(64)
+  requestId   String?  @map("request_id") @db.VarChar(128)
+  /// Small, validated, secret-free context (never passwords, tokens or full request bodies).
+  metadata    Json     @default("{}")
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([occurredAt])
+  @@index([action, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@map("audit_events")
+}
+
+/// Fixed-window rate-limit counters (PostgreSQL fallback when no Redis-compatible cache is configured).
+model RateLimitBucket {
+  /// "<scope>:<subject>:<window index>"
+  key       String   @id @db.VarChar(255)
+  count     Int
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("rate_limit_buckets")
 }

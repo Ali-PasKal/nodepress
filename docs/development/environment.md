@@ -28,6 +28,13 @@ offending variable names — never their values — if anything is invalid. Empt
 | `OPENAPI_ENABLED` | `true` outside production, `false` in production | Serve Swagger UI and the OpenAPI document at `/api/docs` |
 | `HEALTH_CHECK_TIMEOUT_MS` | `2000` | Per-dependency timeout for the readiness probe |
 | `PRISMA_MIGRATIONS_DIR` | `apps/api/prisma/migrations` | Where readiness looks for shipped migrations |
+| `SESSION_COOKIE_SECURE` | `true` in production, `false` otherwise | Secure (`__Host-`) session cookie; requires HTTPS. Must be `true` in production. |
+| `SESSION_IDLE_TIMEOUT_MINUTES` | `1440` (24 h) | Session ends after this long without use |
+| `SESSION_ABSOLUTE_TIMEOUT_HOURS` | `168` (7 days) | Maximum session lifetime regardless of use |
+| `SETUP_TOKEN` | — | One-time setup-wizard token (≥ 24 chars). When unset, a random token is generated and logged at every start until installation completes. |
+| `MAIL_TRANSPORT` | `log` outside production, `disabled` in production | `log` (message incl. links in the API log), `file` (JSON files in `MAIL_FILE_DIR`), `disabled`. `log`/`file` are refused in production. SMTP arrives with the job queue (M3). |
+| `MAIL_FILE_DIR` | `<tmp>/nexora-mail` | Directory for the `file` transport (files are mode 0600) |
+| `MAIL_FROM` | `NEXORA CMS <no-reply@localhost>` | Sender address |
 
 ### Production safety rules (`NODE_ENV=production`)
 
@@ -35,7 +42,9 @@ The API refuses to start if:
 
 - `DATABASE_URL` has an empty password or a well-known development password (e.g. the one in `.env.example`);
 - `LOG_FORMAT=pretty`;
-- any `CORS_ALLOWED_ORIGINS` entry is not `https://`.
+- any `CORS_ALLOWED_ORIGINS` entry is not `https://`;
+- `SESSION_COOKIE_SECURE=false`;
+- `MAIL_TRANSPORT` is `log` or `file` (they write reset links to logs or disk).
 
 ## Docker Compose
 

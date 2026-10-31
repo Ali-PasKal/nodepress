@@ -35,8 +35,15 @@ export default defineConfig({
               priority: 30,
             },
             { name: 'router', test: /node_modules[\\/]react-router[\\/]/, priority: 20 },
-            { name: 'data', test: /node_modules[\\/](zod|@tanstack)[\\/]/, priority: 20 },
-            { name: 'vendor', test: /node_modules[\\/]/, priority: 10 },
+            // src/zod-config.ts must share Zod's chunk: every chunk that constructs schemas imports
+            // this one, so Zod's jitless switch runs before any schema exists. Constructing a schema
+            // first makes Zod probe for eval, which the strict CSP reports as a violation (covered by
+            // the "no Content Security Policy violations" E2E test).
+            {
+              name: 'data',
+              test: /node_modules[\\/](zod|@tanstack)[\\/]|[\\/]src[\\/]zod-config\.ts$/,
+              priority: 20,
+            },
           ],
         },
       },

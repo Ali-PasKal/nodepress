@@ -69,7 +69,7 @@ export default defineConfig(
 
   // React (admin app and UI package).
   {
-    files: ['apps/admin/**/*.{ts,tsx}', 'packages/ui/**/*.{ts,tsx}'],
+    files: ['apps/admin/src/**/*.{ts,tsx}', 'packages/ui/**/*.{ts,tsx}'],
     languageOptions: { globals: globals.browser },
     plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
     rules: {
@@ -103,6 +103,8 @@ export default defineConfig(
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
+      // Async fetch/HTTP stubs are idiomatic even when they resolve synchronously.
+      '@typescript-eslint/require-await': 'off',
     },
   },
 
@@ -111,6 +113,12 @@ export default defineConfig(
     files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: { globals: globals.node },
+  },
+
+  // Developer scripts print reports to stdout.
+  {
+    files: ['**/scripts/**/*.mjs'],
+    rules: { 'no-console': 'off' },
   },
 
   // Static scripts served to the browser as-is (no bundling).

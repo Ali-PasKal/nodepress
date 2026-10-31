@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Outlet } from 'react-router';
 import { Brand } from '../components/brand';
 import { ThemeToggle } from '../components/theme-toggle';
+import { UserMenu } from '../components/user-menu';
 import { useUiStore } from '../stores/ui-store';
 import { Breadcrumbs } from './breadcrumbs';
 import { SidebarNav } from './sidebar-nav';
@@ -107,6 +108,7 @@ export function AdminLayout() {
             <Breadcrumbs />
           </div>
           <ThemeToggle />
+          <UserMenu />
         </header>
 
         <main

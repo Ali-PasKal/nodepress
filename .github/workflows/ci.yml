@@ -32,6 +32,8 @@ jobs:
       - run: pnpm run format:check
       - run: pnpm run typecheck
       - run: pnpm run build
+      - name: Admin bundle size budget
+        run: pnpm --filter @nexora/admin run size
 
   test:
     name: Unit, integration and end-to-end tests

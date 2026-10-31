@@ -114,10 +114,10 @@ Rules:
 |---|---|---|
 | kernel: `config`, `database`, `logging`, `security` | env validation, Prisma client, pino, headers/CORS/limits | **M1** |
 | `health`, `system` | liveness/readiness, installation state | **M1** |
-| `identity` | users, credentials, sessions, password reset, email verification | M2 |
-| `access` | roles, capabilities, role assignments, policy evaluation | M2 |
-| `audit` | append-only audit events | M2 |
-| `setup` | installation wizard (one-shot, locked after install) | M2 |
+| `auth`, `account`, `security` | sessions, credentials, password reset, CSRF, rate limits, access guard | **M2** |
+| `users`, `roles` | users, roles, capabilities, role assignments, escalation rules | **M2** |
+| `audit` | append-only audit events | **M2** |
+| `setup`, `settings`, `sites` | installation wizard (one-shot), site settings, default site | **M2** |
 | `content` | content types, entries (pages/posts/custom), revisions, scheduling, previews | M3 |
 | `taxonomy` | taxonomies, terms, assignments | M3 |
 | `media` | uploads, variants, usage references, storage adapters | M3 |
@@ -142,28 +142,37 @@ Node HTTP server (headers/request timeouts; trust-proxy resolution for req.ip)
  → JSON body parser with size limit (413 on excess)
  → Nest router (URI versioning: /api/v1/…)
    → pino-http access log (request id, method, path without query, status; credentials redacted)
-   → [M2] authentication guard → capability guard → CSRF guard for cookie-authenticated mutations
-   → [M2] Zod validation pipe
+   → access guard: origin check (unsafe methods) → session → policy → CSRF token → capabilities
+   → Zod validation pipe
    → timeout interceptor (503 REQUEST_TIMEOUT after REQUEST_TIMEOUT_MS)
    → controller → application service
    → global exception filter (uniform error envelope; never stack traces or internals; DB unavailable ⇒ 503)
 ```
 
-## 5. Authentication and authorisation (target design, M2)
+## 5. Authentication and authorisation (M2)
 
-- Server-side sessions stored in PostgreSQL (optionally cached in Redis). The cookie holds an opaque random
-  token; only its SHA-256 hash is stored. Cookies: `HttpOnly`, `Secure` (prod), `SameSite=Strict`, `Path=/`,
-  `__Host-` prefix when served over HTTPS on a single origin.
-- Session rotation on login and privilege change; idle + absolute expiry; revocation per session and per user.
-- Passwords hashed with Argon2id (memory-hard parameters documented and tunable).
-- CSRF: synchroniser token bound to the session, required on every state-changing request authenticated by
-  cookie, plus `Origin`/`Sec-Fetch-Site` verification.
-- Authorisation is capability-based (`content.publish`, `media.delete`, `plugins.manage`, …). Roles are
-  configurable bundles of capabilities. Code checks capabilities (and ownership where relevant), never role
-  names. Every protected route declares its required capability; a test enumerates routes and fails if any
-  protected route lacks a declaration.
-- Rate limiting: sliding window keyed by IP + account for login, reset and other sensitive endpoints; Redis
-  when available, PostgreSQL fallback otherwise.
+- **Sessions** are server-side rows in PostgreSQL. The cookie holds an opaque 256-bit random token; only its SHA-256
+  is stored. Cookie: `HttpOnly`, `SameSite=Strict`, `Path=/`; in production `Secure` with the `__Host-` prefix
+  (`SESSION_COOKIE_SECURE` is enforced there). Idle (default 24 h) and absolute (default 7 days) expiry; a new
+  session on every login (any presented session is revoked: fixation defence) and on password change; revocation
+  per session, per user, on suspension and on role change.
+- **Passwords**: Argon2id (`@node-rs/argon2`, m=19 MiB, t=2, p=1), transparently rehashed on login if parameters
+  change; minimum 12 characters; unknown accounts are verified against a dummy hash to equalise timing.
+- **CSRF**: every unsafe request must come from a trusted origin (`Origin` must match `Host` or the CORS allowlist;
+  `Sec-Fetch-Site: cross-site` is rejected) — this also covers login and setup. Cookie-authenticated mutations must
+  additionally send `X-CSRF-Token`, an HMAC of a fixed label keyed by the session token: bound to the session,
+  rotated with it, and never stored.
+- **Authorisation** is capability-based (`users.read`, `roles.manage`, …). A global guard is fail-closed: routes must
+  declare `@Public()`, `@Authenticated()` or `@RequireCapabilities(...)`, and an integration test inventories every
+  route. Capabilities are resolved per request, so role changes apply immediately. Roles are configurable bundles;
+  the Super Administrator role has `grants_all`. Escalation rules (subset rule, no self role/status changes, no editing
+  one's own role, last active super admin) live in the users and roles services.
+- **Rate limiting**: fixed-window counters keyed by hashed subject (IP or email), in Redis when connected and in
+  PostgreSQL otherwise.
+- **Setup**: a one-time token (generated and logged at startup, or `SETUP_TOKEN`) is required to complete the
+  wizard; installation is serialised by an advisory lock and permanently locked afterwards.
+- **Audit**: security-relevant changes write an `audit_events` row in the same transaction; a trigger rejects
+  `UPDATE`/`DELETE`.
 
 ## 6. Data architecture
 

@@ -6,7 +6,7 @@ results that were actually observed.
 | Milestone | Scope | Status |
 |---|---|---|
 | **M1** | Architecture, repo structure, dependencies, Docker dev environment, database, health, CI | **Complete** (see results and caveats below) |
-| M2 | Authentication, sessions, users, roles and capabilities, audit log, setup wizard, security foundations | Not started |
+| **M2** | Authentication, sessions, users, roles and capabilities, audit log, setup wizard, security foundations | **Complete** (see results and caveats below) |
 | M3 | Pages, posts, content types, taxonomies, revisions, media library, job queue | Not started |
 | M4 | Theme engine, public site runtime, starter theme, templates, SEO fundamentals, Delivery API | Not started |
 | M5 | Visual editor: document schema, widget registry, canvas, drag and drop, undo/redo, responsive controls | Not started |
@@ -104,7 +104,7 @@ suite and `nexora dev` pass. CI now also runs the test suite on Node 23.7.0 and 
 - **Docker images were built in a sandbox** that needed host networking and a proxy CA; standard CI runners should not need either. Base images use major tags (`node:22-alpine`, `postgres:17-alpine`); pin digests before production (M8).
 - **Local tests ran against PostgreSQL 16**, while Compose and CI use PostgreSQL 17. The schema uses nothing version-specific.
 - **API runtime image is large** (~750 MB uncompressed) because pnpm links the Prisma CLI as an optional peer of `@prisma/client` (R-07).
-- **No authentication exists yet.** All M1 endpoints are intentionally public and expose no private data. The admin shows only system status and states that setup requires the authentication module.
+- **No authentication existed in M1** (resolved in M2). All M1 endpoints were intentionally public and exposed no private data.
 - **`apps/site-runtime`, plugin/theme SDKs, editor packages** are deliberately not created yet (they are planned for M4–M6; empty placeholder packages would be misleading).
 - **Admin bundle:** about 167 kB gzipped across vendor chunks (React 68 kB, data/Zod+Query 34 kB, router 31 kB, other 26 kB, app 8 kB). Budget for the admin shell: ≤ 200 kB gzipped initial JS; route-level code splitting arrives with more routes.
 - **Exit code on SIGTERM:** Nest re-raises the signal after a graceful shutdown, so the process exits with 143. This is expected for signal termination.
@@ -115,19 +115,158 @@ risks R-01…R-08 (§6).
 
 ---
 
-## Next: Milestone 2 — Identity, access and security foundations
+## Milestone 2 — Identity, access control and audit
+
+Plan, scope and decisions: [`docs/milestones/m2-identity-access.md`](../milestones/m2-identity-access.md).
+
+### Starting point
+M1 delivered the API kernel, the `system_state` table and an admin shell with one public status page. No
+authentication existed and every endpoint was public.
+
+### What was built
+- **Data model** (migration `20261031120000_identity_access_audit`): `sites`, `users`, `user_credentials`,
+  `sessions`, `roles`, `capabilities`, `role_capabilities`, `role_assignments`, `password_reset_tokens`,
+  `audit_events` (append-only trigger), `rate_limit_buckets`; CHECK constraints for normalised emails, key
+  formats and hash lengths; 10 core capabilities and 6 system roles seeded by the migration.
+- **Setup wizard**: environment check → site → security → first super administrator. It needs the one-time
+  setup token (printed at startup, or `SETUP_TOKEN`); installation is serialised with a PostgreSQL advisory
+  lock and permanently locked afterwards.
+- **Sessions**: Argon2id passwords; opaque 256-bit session tokens with only their SHA-256 stored; cookie
+  `__Host-nexora_session` (Secure) or `nexora_session` (plain-HTTP development), HttpOnly, SameSite=Strict;
+  idle and absolute expiry; rotation on sign-in and password change; revocation of one session, all other
+  sessions, or all of a user's sessions.
+- **CSRF**: `Origin`/`Sec-Fetch-Site` verification on every unsafe request, plus a session-bound HMAC token
+  (`X-CSRF-Token`) on every cookie-authenticated mutation.
+- **Rate limits** (Redis when configured, PostgreSQL otherwise): sign-in per address and per account,
+  password reset requests and confirmations, setup. Responses carry 429 + `Retry-After`.
+- **Authorisation**: a global guard that denies by default; every route is `@Public`, `@Authenticated` or
+  `@RequireCapabilities(...)`, enforced by a route-inventory test. Escalation rules live in one service: no
+  granting of unheld capabilities, no self role/status change, no editing of more privileged users or of
+  one's own role, the Super Administrator role is immutable, and the last active super administrator cannot
+  be demoted or suspended.
+- **Users, roles, account, settings, audit APIs** (24 OpenAPI paths), password reset by email (development
+  transports only, see limitations) and operator recovery: `nexora user reset-password --email <email>`.
+- **Admin UI**: setup wizard, sign-in, forgot/reset password, users (search, filters, pagination, create,
+  edit, role, suspend/reactivate, set password, sessions), roles (custom roles, capability editor), audit log
+  (filters, pagination), profile (name, password, own sessions), site settings; capability-aware navigation
+  and routes; session-expiry handling; lazy-loaded routes.
+
+### Acceptance criteria and results
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Install only with a valid setup token; afterwards setup endpoints return 409/404 and cannot create users | ✅ `setup.test.ts` (wrong token creates nothing, rerun refused, concurrent attempts: exactly one succeeds, cross-origin rejected, generated token stored hashed) |
+| 2 | HttpOnly, SameSite=Strict cookie (Secure in production); logout and revocation invalidate it server-side immediately | ✅ `auth.test.ts`, `account.test.ts` (revoke one / all others / current), `users-roles.test.ts`; E2E `auth.spec.ts`; Secure `__Host-` cookie verified in the production Compose stack |
+| 3 | Idle and absolute expiry; new session on sign-in and password change, old ones revoked | ✅ `auth.test.ts` (rotation on sign-in, idle and absolute expiry), `account.test.ts` (password change rotates the caller's session and revokes all others), `password-reset.test.ts` |
+| 4 | Cookie-authenticated mutations fail without a valid CSRF token; cross-origin unsafe requests rejected before authentication | ✅ `auth.test.ts`, `setup.test.ts`, `security-helpers.test.ts` |
+| 5 | Sign-in, password reset and setup rate limited (429 + `Retry-After`), with and without Redis | ✅ `auth.test.ts` (per-account lockout, per-address limit, Redis-backed run), `password-reset.test.ts` |
+| 6 | Unknown email and wrong password give identical responses | ✅ `auth.test.ts` (identical status and body; unknown accounts verify against a dummy hash so timing matches); reset requests answer identically too (`password-reset.test.ts`) |
+| 7 | Every non-public route requires a session and a declared capability; 401/403 tested per module | ✅ route-inventory test in `access-control.test.ts`; viewer/administrator matrices for every module |
+| 8 | Escalation rules hold, including the last-super-admin rule | ✅ `access-control.test.ts`, `last-super-admin.test.ts` (including a custom role holding every capability) |
+| 9 | Reset tokens single-use, expiring, stored hashed, and revoke sessions when used | ✅ `password-reset.test.ts`; E2E `account.spec.ts` follows a real emailed link |
+| 10 | Audit events in the same transaction; rows cannot be updated or deleted by the application | ✅ `audit.test.ts` (including the trigger rejecting UPDATE/DELETE and no secrets in metadata) |
+| 11 | Admin UI against the real API, with loading/empty/error states, confirmations, keyboard-accessible dialogs, responsive at 375/768/1280 | ✅ 50 Vitest/RTL tests; Playwright suite on desktop, tablet and mobile projects |
+| 12 | All checks pass on Node 22 and Node 23.7; CI green | ✅ Node 22 and Node 23.7 locally (below); CI: see "Known limitations" |
+
+### Verification run (2026-10-31, local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16.15, Redis 7)
+
+| Command | Result |
+|---|---|
+| `pnpm run lint` | exit 0 |
+| `pnpm run format:check` | exit 0 |
+| `pnpm run typecheck` | exit 0 |
+| `pnpm run build` | exit 0 |
+| `pnpm --filter @nexora/admin run size` | exit 0 — initial JS 209.7 kB gzip (budget 215 kB), CSS 7.8 kB (budget 12 kB) |
+| `TEST_REDIS_URL=… pnpm run test` | exit 0 — shared 5 · ui 7 · cli 21 · admin 50 · api 153 (**236 passed**) |
+| `pnpm --filter @nexora/api run db:check-drift` | exit 0 — "No difference detected." |
+| `pnpm run test:e2e` | exit 0 — **58 passed** (setup project + 19 tests × desktop/tablet/mobile) |
+| `pnpm audit --prod --audit-level=high` | exit 0 — "No known vulnerabilities found" |
+| `pnpm audit` (including dev deps) | 1 moderate, unchanged from M1: `minimatch` via ESLint (R-06). ESLint 10.14 requires `minimatch@^10.2.6` and the fix exists only in 11.x |
+| `nexora user reset-password --email <user>` against a populated database | exit 0 — temporary password printed once, sessions revoked, `user.password_reset_by_operator` audited; unknown email → exit 1 |
+| Node 23.7.0, fresh copy of the tree: `pnpm install --frozen-lockfile`, `typecheck`, `build`, `test` | all exit 0 — 234 tests passed; `account.test.ts` (added afterwards) then passed on 23.7.0 as well |
+| `docker build` api runtime / api migrator / admin | succeeded (runtime 754 MB, admin 83 MB; sandbox proxy CA passed as a BuildKit secret) |
+| `docker compose --profile app up` (NODE_ENV=production) | all services healthy; API logged the one-time setup token |
+| Chromium through nginx (`http://127.0.0.1:58080/admin/`) | setup wizard → install → sign in → profile update → sign out all succeeded; cookie `__Host-nexora_session` Secure, HttpOnly, SameSite=Strict; 0 CSP violations |
+| Post-install probes through nginx | `POST /setup/install` with a body → 409, no user created; cross-origin sign-in → 403 `CSRF_FAILED`; audit rows carry the client address (not nginx's); API runs as uid 1000 |
+
+Issues found and fixed during M2 verification:
+
+- **Sign-out did not leave the page**: clearing the whole query cache detached the session observers, so the
+  route guards never re-rendered → only the session entry is replaced and private queries are removed
+  (covered by the admin auth-flow tests and E2E).
+- **Route-level code splitting broke the CSP guarantee**: chunks containing shared schemas were evaluated
+  before the entry's Zod jitless switch, so Zod probed for `eval` and the CSP reported a violation. Rolldown's
+  `strictExecutionOrder` fixed it but cost ~6 kB of runtime wrappers; instead `src/zod-config.ts` is placed in
+  Zod's own chunk, which every schema chunk imports (the E2E CSP test guards this).
+- **Mobile layout**: row actions in the users table were pushed off-screen and toasts covered the header →
+  role and status move under the name below the `sm` breakpoint; toasts sit bottom-right.
+- **nginx forwarded `Host` without the port** (`$host`), so behind a mapped port the CSRF origin check would
+  reject every sign-in through the container stack → `$http_host`.
+- **Own password change had no automated test** (found while mapping the acceptance criteria to evidence) →
+  `account.test.ts` now covers it, together with listing and revoking own sessions. It passed unchanged.
+- **`nexora user reset-password` always failed**: pnpm 10 forwards a literal `--` to the script, which made
+  `--email` a positional argument → the CLI no longer passes `--`, and the script also tolerates it. Found by
+  running the command against a real database; unit tests only covered argument validation.
+- **Initial admin bundle grew to ~225 kB gzip** with the M2 screens → routes are lazy-loaded (209.7 kB) and
+  a 215 kB budget is enforced in CI.
+- The generated `docs/api/openapi.json` was being reformatted by Prettier → excluded from formatting.
+
+### Important files
+
+| Area | Files |
+|---|---|
+| Plan | `docs/milestones/m2-identity-access.md` |
+| Database | `apps/api/prisma/schema.prisma`, `apps/api/prisma/migrations/20261031120000_identity_access_audit/` |
+| Security core | `apps/api/src/modules/security/` (crypto, password hasher, sessions, CSRF, rate limiter, authorisation, access guard) |
+| Feature modules | `apps/api/src/modules/{setup,auth,account,users,roles,audit,settings,sites,mail}/` |
+| Operator recovery | `apps/api/src/scripts/reset-password.ts`, `packages/cli/src/commands/user.ts` |
+| Contracts | `packages/shared/src/contracts/{capabilities,auth,users,roles,audit,setup,settings}.ts` |
+| Admin | `apps/admin/src/features/{auth,setup,users,roles,audit,account,settings}/`, `apps/admin/e2e/` |
+| Tests | `apps/api/test/integration/*.test.ts`, `apps/api/test/helpers/identity.ts` |
+
+### Known limitations and caveats (honest list)
+
+- **No production mail delivery.** Transports are `log` and `file` (development/test only, refused in
+  production) and `disabled`. In production a "forgot password" request is accepted but no email is sent;
+  administrators can set passwords and operators can use `nexora user reset-password`. SMTP arrives with the
+  job queue in M3 (R-11).
+- **Reset emails are sent in-process** after the response; a crash before delivery loses the message (R-11).
+- **Expired sessions and reset tokens are not purged yet** (they are rejected, just kept). Rate-limit buckets
+  are purged opportunistically. A scheduled cleanup job arrives with the job queue (M3).
+- **Not implemented:** email verification, MFA/2FA, SSO/OAuth, API tokens for non-browser clients.
+- **Content capabilities do not exist yet**, so Editor, Author, Contributor and Viewer can only sign in and
+  manage their own profile until M3.
+- **Setup token in the log** when `SETUP_TOKEN` is unset (R-09). Per-account lockout can be triggered by
+  anyone who knows an address (R-10).
+- **Fixed-window rate limits** allow up to twice the limit across a window boundary.
+- **Idle-timeout precision**: session activity is written at most once a minute, so idle expiry is accurate
+  to about 60 seconds.
+- **The production-like Compose stack serves plain HTTP on 127.0.0.1** with Secure cookies. Browsers accept
+  Secure cookies on `localhost`/`127.0.0.1`, so it works locally, but any real deployment must terminate TLS
+  in front of it; otherwise sign-in cookies are rejected.
+- Local tests ran against PostgreSQL 16; CI and Compose use 17.
+- **GitHub CI:** pending at the time of writing; this line is updated once the run for the M2 push finishes.
+
+### Security considerations for M2
+Controls implemented in M2 and residual risks R-09…R-13 are listed in
+[`docs/security/threat-model.md`](../security/threat-model.md).
+
+---
+
+## Next: Milestone 3 — Content, media and background jobs
 
 Planned scope (to be confirmed at milestone start):
 
-1. Data model: `users`, `credentials` (Argon2id), `sessions` (hashed opaque tokens), `roles`, `capabilities`, `role_capabilities`, `role_assignments`, `audit_events`; a default `sites` row for future multi-site scoping.
-2. Cookie sessions (`__Host-` prefix, HttpOnly, Secure, SameSite=Strict), rotation on login and privilege change, idle and absolute expiry, revocation.
-3. CSRF protection (synchroniser token + `Origin`/`Sec-Fetch-Site` checks) for cookie-authenticated mutations.
-4. Rate limiting (Redis when available, PostgreSQL fallback) for login, password reset and setup.
-5. Capability guard + route declaration test (every protected route must declare a capability).
-6. Setup wizard (environment check, admin creation, site name/base URL), locked after installation; writes `system_state.installed_at`.
-7. Password reset (single-use, hashed, expiring tokens; email via a background job); email verification where configured.
-8. Admin: login, logout, setup wizard, profile, users and roles management, sessions list with revoke; command palette and notifications once there is content to drive them.
-9. Zod validation pipe for request DTOs; authorisation and security regression tests.
+1. Durable background job queue (PostgreSQL-backed, Redis optional) with retries and a worker process;
+   move mail onto it, add an SMTP transport, and schedule cleanup of expired sessions and reset tokens.
+2. Content model: pages and posts, custom content types and fields, taxonomies (categories, tags),
+   statuses (draft, scheduled, published, trashed), slugs, revisions with restore.
+3. Content capabilities (`content.*` per type, own vs. others) and their mapping to the Editor, Author,
+   Contributor and Viewer roles; audit events for publishing and deletion.
+4. Media library through the storage abstraction (local disk + S3-compatible): upload validation (type
+   sniffing, size limits), image variants, alt text, safe serving headers.
+5. Admin: content lists with filters, bulk actions, a structured (non-visual) editor for fields and
+   revisions, media library UI; command palette and notifications.
 
-Risks to address early: session fixation, user enumeration on login/reset, timing attacks on token
-comparison, and the CSRF strategy for any future non-browser API clients (token auth).
+Risks to address early: stored XSS through rich text (sanitise on write and on render), upload validation
+and storage isolation, revision growth, and authorisation of "own" vs. "others'" content.

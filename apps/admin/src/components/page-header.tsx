@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { usePageTitle } from './use-page-title';
 
 interface PageHeaderProps {
   title: string;
@@ -7,9 +8,7 @@ interface PageHeaderProps {
 }
 
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
-  useEffect(() => {
-    document.title = `${title} · NEXORA CMS`;
-  }, [title]);
+  usePageTitle(title);
 
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">

@@ -1,9 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+import { E2E_MAIL_DIR, E2E_SETUP_TOKEN } from './e2e/constants';
 
 /**
  * End-to-end tests run the production admin build (vite preview) against a real API process and a
- * real PostgreSQL database, at desktop, tablet and mobile viewport sizes.
+ * fresh PostgreSQL database. A "setup" project completes the installation wizard once; the viewport
+ * projects (desktop, tablet, mobile) then exercise the dashboard.
  */
 const isCI = process.env.CI !== undefined;
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -23,18 +25,23 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${String(ADMIN_PORT)}`,
     trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
   projects: [
+    { name: 'setup', testMatch: /setup\.setup\.ts/, use: { ...devices['Desktop Chrome'] } },
     {
       name: 'desktop',
+      dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } },
     },
     {
       name: 'tablet',
+      dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], viewport: { width: 768, height: 1024 }, hasTouch: true },
     },
     {
       name: 'mobile',
+      dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 375, height: 812 },
@@ -45,19 +52,28 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // Build the API, apply migrations to the E2E database, then start the server.
-      command:
-        'pnpm --filter @nexora/api run build && pnpm --filter @nexora/api exec prisma migrate deploy && pnpm --filter @nexora/api run start',
+      // Fresh database → migrations → API.
+      command: [
+        'pnpm --filter @nexora/api run build',
+        'node apps/api/scripts/reset-e2e-db.mjs',
+        'pnpm --filter @nexora/api exec prisma migrate deploy',
+        'pnpm --filter @nexora/api run start',
+      ].join(' && '),
       cwd: repoRoot,
       url: `http://127.0.0.1:${String(API_PORT)}/api/v1/health/live`,
       reuseExistingServer: !isCI,
-      timeout: 120_000,
+      timeout: 180_000,
       env: {
         NODE_ENV: 'test',
         HOST: '127.0.0.1',
         PORT: String(API_PORT),
         DATABASE_URL: databaseUrl,
         LOG_LEVEL: 'warn',
+        SETUP_TOKEN: E2E_SETUP_TOKEN,
+        MAIL_TRANSPORT: 'file',
+        MAIL_FILE_DIR: E2E_MAIL_DIR,
+        // The Vite preview proxy is one trusted hop; tests vary X-Forwarded-For to model distinct clients.
+        TRUST_PROXY: '1',
       },
     },
     {

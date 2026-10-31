@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | Living document. Revised at the start of every milestone. |
-| Last reviewed | Milestone 1 (foundation) |
+| Last reviewed | Milestone 2 (identity, access control, audit) |
 | Scope | All components in [the architecture overview](../architecture/overview.md) |
 
 NEXORA does **not** claim to be invulnerable or "more secure than WordPress". It aims for a documented
@@ -48,14 +48,15 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 - **Goals:** read unpublished content, inject script into pages (XSS), abuse forms/search for spam or DoS, enumerate users, exploit known CMS vulnerabilities, brute-force logins.
 - **Mitigations:**
   - Implemented (M1): request body size limits (413); per-handler timeouts (503) and transport timeouts; strict security headers with CSP `default-src 'none'` on API responses; uniform error envelope that never reflects input or leaks stack traces; the unauthenticated readiness endpoint coalesces probes into at most one dependency check per second; `Cache-Control: no-store` by default; production disables API docs by default.
-  - Planned (M2): rate limiting and login abuse protection; generic authentication errors (no user enumeration).
+  - Implemented (M2): rate limits on sign-in (20 per IP per 5 min; 5 failures per account per 15 min, then locked for the window even with the right password), password reset (5 per IP per 15 min; 3 per account per hour, silently) and setup (10 per IP per 15 min), backed by Redis when available and PostgreSQL otherwise; identical responses and comparable timing (dummy Argon2 verification) for unknown accounts, wrong passwords and suspended accounts; password reset responds identically whether or not the account exists and sends mail in the background; a one-time setup token prevents strangers from claiming a fresh install.
   - Planned (M4): a single Delivery API choke point that only ever returns published content unless a valid, expiring, signed preview token is supplied; cache keys that never mix draft and published content.
   - Planned (M7): form spam mitigation (honeypot + rate limits + optional challenge), server-side validation.
 
 ### 3.2 Authenticated content editors (Author, Contributor, Editor)
 - **Goals (malicious or compromised account):** stored XSS through rich text or HTML embeds to hijack an administrator's session; privilege escalation; editing or deleting other users' content.
 - **Mitigations:**
-  - Planned (M2): capability-based authorisation checked server-side on every operation; ownership checks; audit log.
+  - Implemented (M2): capability-based authorisation on every route via a global, fail-closed guard (a route without a declared policy is refused, and a test inventories every route); privilege-escalation rules (no granting unheld capabilities, no managing more privileged users, no self role/status changes, no editing one's own role, last active Super Administrator protected); role and status changes revoke the target's sessions; append-only audit log.
+  - Planned (M3): content ownership checks.
   - Planned (M3/M5): allowlist-based HTML sanitisation on write **and** at render; a structured document model with no stored JavaScript; HTML Embed rendered in a sandboxed `iframe` without `allow-same-origin`; strict CSP on public pages.
   - Implemented (M1): admin CSP has `script-src 'self'` with no inline scripts (enforced by an E2E test that fails on any CSP violation).
 
@@ -71,7 +72,7 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 - **Explicit non-claim:** a Node.js process, a manifest, or TypeScript types do **not** sandbox code. In-process "trusted" plugins have full privileges.
 
 ### 3.5 Compromised dependencies (supply chain)
-- Implemented (M1): exact version pinning plus a committed lockfile; `pnpm install --frozen-lockfile` in CI and Docker builds; dependency lifecycle scripts blocked by default (pnpm 10), with an explicit allowlist (`onlyBuiltDependencies`: Prisma engines only) and install-time telemetry explicitly blocked; `pnpm audit --prod --audit-level=high` gates CI; GitHub Actions pinned to commit SHAs with read-only `contents` permission and `persist-credentials: false`.
+- Implemented (M1): exact version pinning plus a committed lockfile; `pnpm install --frozen-lockfile` in CI and Docker builds; dependency lifecycle scripts blocked by default (pnpm 10), with an explicit allowlist (`onlyBuiltDependencies`: `@prisma/engines` only; Prisma's version-gate script is explicitly ignored) and install-time telemetry explicitly blocked; `pnpm audit --prod --audit-level=high` gates CI; GitHub Actions pinned to commit SHAs with read-only `contents` permission and `persist-credentials: false`.
 - Planned (M8): SBOM generation, image scanning, Renovate/Dependabot with review, signed release artifacts.
 - Residual: a malicious release of a pinned dependency that is not yet known to advisory databases.
 
@@ -109,7 +110,16 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 | Migration drift detection | Implemented (M1) | `db:check-drift`; `migrations.test.ts`; CI |
 | Supply-chain basics (lockfile, blocked install scripts, SHA-pinned actions, audit) | Implemented (M1) | `pnpm-workspace.yaml`, `.github/workflows/ci.yml` |
 | Container hardening | Implemented (M1) | Dockerfiles, `docker-compose.yml` (verified: uid 1000, read-only rootfs) |
-| Authentication, sessions, CSRF, rate limiting, audit log | Planned (M2) | — |
+| Argon2id password hashing (OWASP baseline parameters, rehash on login when they change) | Implemented (M2) | `password-hasher.service.ts` |
+| Server-side sessions: opaque 256-bit token in an HttpOnly, SameSite=Strict (`__Host-`, Secure in production) cookie; only the SHA-256 is stored; idle + absolute expiry; rotation on login and password change; revocation | Implemented (M2) | `session.service.ts`, `session-cookie.ts`; `auth.test.ts` |
+| CSRF: origin/`Sec-Fetch-Site` check on every unsafe request (incl. login/setup) + session-bound HMAC token in `X-CSRF-Token` | Implemented (M2) | `csrf.ts`, `access.guard.ts`; `auth.test.ts`, `security-helpers.test.ts` |
+| Secure-by-default authorisation (fail-closed guard, capability declarations, route inventory test) | Implemented (M2) | `access.guard.ts`; `access-control.test.ts` |
+| Privilege-escalation rules and last-super-admin guard | Implemented (M2) | `users.service.ts`, `roles.service.ts`; `access-control.test.ts`, `last-super-admin.test.ts` |
+| Rate limiting (Redis or PostgreSQL) | Implemented (M2) | `rate-limiter.service.ts`; `auth.test.ts`, `password-reset.test.ts` |
+| Single-use, hashed, 30-minute password reset tokens; reset revokes all sessions | Implemented (M2) | `password-reset.service.ts`; `password-reset.test.ts` |
+| One-time setup token; setup serialised by an advisory lock; locked after install | Implemented (M2) | `setup.service.ts`; `setup.test.ts` |
+| Append-only audit log (DB trigger), written in the same transaction as the audited change; no secrets in metadata | Implemented (M2) | migration `…_identity_access_audit`; `audit.test.ts` |
+| Request validation with shared Zod contracts (422 with per-field issues) | Implemented (M2) | `zod-validation.pipe.ts` |
 | HTML sanitisation, upload validation, SSRF guard | Planned (M3) | — |
 | Delivery API draft isolation, signed previews | Planned (M4) | — |
 | Plugin isolation | Planned (M6) | — |
@@ -148,7 +158,12 @@ administrator approval). The UI and documentation must never present trusted plu
 | R-05 | The timeout interceptor stops waiting but cannot cancel in-flight work | Mitigated by DB `statement_timeout`; accepted |
 | R-06 | Moderate dev-only advisory: `minimatch` via ESLint (GHSA-g3hv-75wg-m249) | Accepted: dev tooling only, never in production images; patterns are authored by us |
 | R-07 | API runtime image includes the Prisma CLI (pulled in as an optional peer of `@prisma/client` by pnpm) | Open; the runtime never invokes it. Image slimming tracked for M8 |
-| R-08 | No authentication yet: every M1 endpoint is public by design and exposes no private data | Open until M2 |
+| R-08 | ~~No authentication~~ | Resolved in M2 |
+| R-09 | The generated setup token is written to the API log (the operator's channel for receiving it) | Accepted: single use, regenerated on every start, useless after installation; set `SETUP_TOKEN` to avoid logging |
+| R-10 | Per-account sign-in lockout can be triggered by anyone who knows an email address (denial of service against that account) | Accepted trade-off against password guessing; the window is 15 minutes and the per-IP limit still applies |
+| R-11 | Password reset email is sent in-process after the response; a crash before delivery loses it, and production has no SMTP transport yet | Open until M3 (SMTP + durable job queue); operators can use `nexora user reset-password`, administrators can set passwords |
+| R-12 | The audit trigger stops the application role, not a database superuser or someone with `ALTER TABLE` rights | Accepted; external log shipping planned for M8 |
+| R-13 | The capability registry is cached in memory for 30 s per API process (role grants themselves are read per request) | Accepted; only affects capabilities added by future plugin installs |
 
 ## 7. Security checklist (per change)
 

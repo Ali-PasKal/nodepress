@@ -3,23 +3,31 @@
 An extensible, self-hostable content management system and visual website builder, built with
 TypeScript, NestJS, PostgreSQL and React.
 
-> **Status: Milestone 1 of 8 (foundation).** The architecture, tooling, database pipeline, health
-> monitoring, admin shell, Docker environment and CI are in place. Content management, authentication,
-> the visual editor, themes and plugins are **not implemented yet**. See
-> [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for exactly what works and what does not.
+> **Status: Milestone 2 of 8 (identity and access).** The foundation (tooling, database pipeline, health
+> monitoring, Docker, CI) plus the setup wizard, sign-in, sessions, users, roles and capabilities, password
+> reset and the audit log are in place. Content management, media, themes, the visual editor and plugins
+> are **not implemented yet**. See [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for
+> exactly what works and what does not.
 
 ## What exists today
 
 - **API** (`apps/api`, NestJS 12 + Prisma 7 + PostgreSQL): validated configuration with production safety
-  rules, liveness/readiness probes (database, migrations, optional cache, graceful drain), installation
-  status, uniform error envelope, strict security headers, CORS allowlist, request limits and timeouts,
-  structured JSON logs with request correlation, and an OpenAPI document generated from shared Zod contracts.
-- **Admin** (`apps/admin`, React 19 + Vite 8 + Tailwind 4): a responsive dashboard shell (collapsible
-  sidebar, accessible mobile drawer, dark/light/system themes) with a live system-status screen, served
-  under `/admin/` behind a strict Content Security Policy.
+  rules, liveness/readiness probes, uniform error envelope, strict security headers, CORS allowlist, request
+  limits and timeouts, structured JSON logs with request correlation, and an OpenAPI document generated from
+  shared Zod contracts.
+- **Identity and access** (M2): a one-time setup wizard protected by a setup token; email + password
+  sign-in (Argon2id) with server-side, HttpOnly cookie sessions (idle and absolute expiry, rotation,
+  revocation); CSRF protection (origin checks + session-bound token); rate limiting (Redis or PostgreSQL);
+  capability-based authorisation that denies by default; six built-in roles plus custom roles, with
+  privilege-escalation rules; password reset; operator recovery from the CLI; and an append-only audit log.
+- **Admin** (`apps/admin`, React 19 + Vite 8 + Tailwind 4): setup wizard, sign-in and password reset, users,
+  roles, audit log, profile and own sessions, site settings and system status, in a responsive dashboard
+  shell (collapsible sidebar, accessible mobile drawer, dark/light/system themes) served under `/admin/`
+  behind a strict Content Security Policy.
 - **Design system** (`packages/ui`), **shared contracts** (`packages/shared`), and the **`nexora` CLI** (`packages/cli`).
 - **Docker Compose** dev services (PostgreSQL 17, Valkey 8) and a production-like container profile.
-- **CI**: lint, format, typecheck, build, unit/integration/E2E tests, migration drift check, dependency audit, image builds.
+- **CI**: lint, format, typecheck, build, bundle-size budget, unit/integration/E2E tests, migration drift
+  check, dependency audit, Node 23.7/24 compatibility, image builds.
 
 ## Quick start
 
@@ -36,7 +44,9 @@ pnpm install
 pnpm nexora dev
 ```
 
-Then open <http://localhost:5173/admin/>. Run `pnpm nexora doctor` to diagnose your environment.
+Then open <http://localhost:5173/admin/>. On first start the API prints a one-time **setup token** to its
+log; the setup wizard asks for it before creating the first super administrator. Run `pnpm nexora doctor`
+to diagnose your environment.
 Full instructions: [`docs/development/getting-started.md`](docs/development/getting-started.md).
 
 ## Commands
@@ -48,6 +58,7 @@ Full instructions: [`docs/development/getting-started.md`](docs/development/gett
 | `pnpm nexora test [--e2e]` | Unit and integration tests, or the Playwright end-to-end suite |
 | `pnpm nexora lint` / `typecheck` | ESLint + Prettier check / strict TypeScript |
 | `pnpm nexora migrate <deploy\|status\|check\|dev\|reset>` | Database migrations (`check` detects schema drift) |
+| `pnpm nexora user reset-password --email <email>` | Account recovery: prints a temporary password once and signs the user out everywhere |
 | `pnpm nexora doctor` | Environment diagnostics |
 
 ## Repository layout

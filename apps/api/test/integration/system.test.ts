@@ -2,6 +2,7 @@ import { apiErrorResponseSchema, systemStatusResponseSchema } from '@nexora/shar
 import pg from 'pg';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { resetIdentityData } from '../helpers/identity.js';
 import { createTestApp, type TestApp } from '../helpers/test-app.js';
 import { TEST_DATABASE_URL, UNREACHABLE_DATABASE_URL } from '../helpers/test-env.js';
 
@@ -10,6 +11,7 @@ describe('GET /api/v1/system/status', () => {
   let db: pg.Client;
 
   beforeAll(async () => {
+    await resetIdentityData();
     testApp = await createTestApp();
     db = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await db.connect();

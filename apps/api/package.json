@@ -21,7 +21,8 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:status": "prisma migrate status",
     "db:migrate:reset": "prisma migrate reset",
-    "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code"
+    "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code",
+    "user:reset-password": "node --env-file-if-exists=../../.env --enable-source-maps dist/scripts/reset-password.js"
   },
   "dependencies": {
     "@nestjs/common": "12.3.2",
@@ -29,6 +30,7 @@
     "@nestjs/platform-express": "12.3.2",
     "@nestjs/swagger": "12.0.5",
     "@nexora/shared": "workspace:*",
+    "@node-rs/argon2": "2.2.2",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "express": "5.3.0",

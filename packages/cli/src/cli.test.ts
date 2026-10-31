@@ -200,3 +200,16 @@ describe('docker diagnostics', () => {
     assert.doesNotMatch(result.stdout, /Created \.env/);
   });
 });
+
+describe('user reset-password', () => {
+  it('requires a well-formed email before doing anything', () => {
+    for (const args of [
+      ['user', 'reset-password'],
+      ['user', 'reset-password', '--email', 'x & del *'],
+      ['user', 'wipe'],
+    ]) {
+      const result = spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8' });
+      assert.equal(result.status, 1, args.join(' '));
+    }
+  });
+});

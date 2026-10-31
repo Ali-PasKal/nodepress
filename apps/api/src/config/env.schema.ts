@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import type { AppConfig, TrustProxySetting } from './app-config.js';
@@ -143,6 +145,23 @@ export const envSchema = z
     OPENAPI_ENABLED: booleanFlag.optional(),
 
     HEALTH_CHECK_TIMEOUT_MS: integer(100, 30_000).default(2_000),
+
+    // Sessions: Secure cookies default on in production (and are required there).
+    SESSION_COOKIE_SECURE: booleanFlag.optional(),
+    SESSION_IDLE_TIMEOUT_MINUTES: integer(5, 60 * 24 * 30).default(60 * 24),
+    SESSION_ABSOLUTE_TIMEOUT_HOURS: integer(1, 24 * 90).default(24 * 7),
+
+    // One-time token for the setup wizard. When unset, a random token is generated and logged at startup.
+    SETUP_TOKEN: z
+      .string()
+      .min(24, { message: 'must be at least 24 characters' })
+      .max(256)
+      .optional(),
+
+    // Mail delivery. "log" and "file" are development transports; SMTP arrives with the job queue (M3).
+    MAIL_TRANSPORT: z.enum(['log', 'file', 'disabled']).optional(),
+    MAIL_FILE_DIR: z.string().min(1).default(join(tmpdir(), 'nexora-mail')),
+    MAIL_FROM: z.string().min(3).max(320).default('NEXORA CMS <no-reply@localhost>'),
     PRISMA_MIGRATIONS_DIR: z.string().min(1).default(DEFAULT_MIGRATIONS_DIR),
   })
   .superRefine((env, ctx) => {
@@ -164,6 +183,20 @@ export const envSchema = z
         path: ['DATABASE_URL'],
         message:
           'uses an empty or well-known development password; set a strong unique password in production',
+      });
+    }
+    if (env.SESSION_COOKIE_SECURE === false) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SESSION_COOKIE_SECURE'],
+        message: 'must be true in production (serve the application over HTTPS)',
+      });
+    }
+    if (env.MAIL_TRANSPORT === 'log' || env.MAIL_TRANSPORT === 'file') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MAIL_TRANSPORT'],
+        message: `"${env.MAIL_TRANSPORT}" writes message contents (including reset links) to disk or logs; not allowed in production`,
       });
     }
     for (const origin of env.CORS_ALLOWED_ORIGINS) {
@@ -243,6 +276,19 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
     },
     health: {
       checkTimeoutMs: parsed.HEALTH_CHECK_TIMEOUT_MS,
+    },
+    session: {
+      cookieSecure: parsed.SESSION_COOKIE_SECURE ?? parsed.NODE_ENV === 'production',
+      idleTimeoutMs: parsed.SESSION_IDLE_TIMEOUT_MINUTES * 60_000,
+      absoluteTimeoutMs: parsed.SESSION_ABSOLUTE_TIMEOUT_HOURS * 3_600_000,
+    },
+    setup: {
+      token: parsed.SETUP_TOKEN ?? null,
+    },
+    mail: {
+      transport: parsed.MAIL_TRANSPORT ?? (parsed.NODE_ENV === 'production' ? 'disabled' : 'log'),
+      fileDir: parsed.MAIL_FILE_DIR,
+      from: parsed.MAIL_FROM,
     },
   };
   return deepFreeze(config);

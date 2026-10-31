@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { isDatabaseUnavailableError } from '../../infrastructure/database/database-errors.js';
 import { ApiException } from './api-exception.js';
 import { mapError } from './error-mapping.js';
+import { RateLimitedException } from './rate-limited.exception.js';
 
 /** Converts every unhandled exception into the uniform API error envelope. */
 @Catch()
@@ -31,6 +32,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       // Streaming already started; the connection is the only thing left to terminate.
       response.end();
       return;
+    }
+    if (exception instanceof RateLimitedException) {
+      response.setHeader('Retry-After', String(exception.retryAfterSeconds));
     }
     response.status(mapped.status).json(mapped.body);
   }

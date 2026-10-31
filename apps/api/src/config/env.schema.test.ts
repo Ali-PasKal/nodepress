@@ -154,3 +154,40 @@ describe('loadConfig', () => {
     });
   });
 });
+
+describe('identity and mail configuration', () => {
+  it('defaults to Secure cookies only in production and sensible session lifetimes', () => {
+    const dev = loadConfig({ DATABASE_URL: DEV_DB });
+    expect(dev.session).toEqual({
+      cookieSecure: false,
+      idleTimeoutMs: 86_400_000,
+      absoluteTimeoutMs: 604_800_000,
+    });
+    expect(dev.mail.transport).toBe('log');
+    const prod = loadConfig({ NODE_ENV: 'production', DATABASE_URL: STRONG_DB });
+    expect(prod.session.cookieSecure).toBe(true);
+    expect(prod.mail.transport).toBe('disabled');
+  });
+
+  it('refuses insecure cookies and development mail transports in production', () => {
+    const error = configError({
+      NODE_ENV: 'production',
+      DATABASE_URL: STRONG_DB,
+      SESSION_COOKIE_SECURE: 'false',
+      MAIL_TRANSPORT: 'file',
+    });
+    expect(error.issues).toEqual([
+      'SESSION_COOKIE_SECURE: must be true in production (serve the application over HTTPS)',
+      'MAIL_TRANSPORT: "file" writes message contents (including reset links) to disk or logs; not allowed in production',
+    ]);
+  });
+
+  it('requires a long setup token when one is provided', () => {
+    expect(configError({ DATABASE_URL: DEV_DB, SETUP_TOKEN: 'short' }).issues).toContain(
+      'SETUP_TOKEN: must be at least 24 characters',
+    );
+    expect(loadConfig({ DATABASE_URL: DEV_DB, SETUP_TOKEN: 'x'.repeat(32) }).setup.token).toBe(
+      'x'.repeat(32),
+    );
+  });
+});

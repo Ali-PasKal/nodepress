@@ -40,6 +40,20 @@ export interface AppConfig {
   readonly health: {
     readonly checkTimeoutMs: number;
   };
+  readonly session: {
+    readonly cookieSecure: boolean;
+    readonly idleTimeoutMs: number;
+    readonly absoluteTimeoutMs: number;
+  };
+  readonly setup: {
+    /** Operator-provided setup token (SETUP_TOKEN); null means generate one at startup. */
+    readonly token: string | null;
+  };
+  readonly mail: {
+    readonly transport: 'log' | 'file' | 'disabled';
+    readonly fileDir: string;
+    readonly from: string;
+  };
 }
 
 /** Injection token for the AppConfig object. */

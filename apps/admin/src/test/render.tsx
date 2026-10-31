@@ -4,7 +4,9 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { adminRoutes } from '../app/routes';
 
 /** Renders the real admin route tree at `path` with a fresh, non-retrying query client. */
-export function renderAdmin(path: string): RenderResult & { queryClient: QueryClient } {
+export function renderAdmin(
+  path: string,
+): RenderResult & { queryClient: QueryClient; router: ReturnType<typeof createMemoryRouter> } {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, refetchInterval: false, refetchOnWindowFocus: false },
@@ -16,7 +18,7 @@ export function renderAdmin(path: string): RenderResult & { queryClient: QueryCl
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { ...result, queryClient };
+  return { ...result, queryClient, router };
 }
 
 type Responder = (url: string) => Response | Promise<Response>;

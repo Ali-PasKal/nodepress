@@ -26,25 +26,52 @@ When `OPENAPI_ENABLED` is on (the default outside production), the running API s
   `CONFLICT`, `PAYLOAD_TOO_LARGE`, `UNSUPPORTED_MEDIA_TYPE`, `RATE_LIMITED`, `REQUEST_TIMEOUT`,
   `SERVICE_UNAVAILABLE`, `INTERNAL_ERROR`. Internal details (stack traces, SQL, hostnames) are never included.
 
-## Endpoints (Milestone 1)
+## Authentication
 
-| Method | Path | Auth | Description |
+- **Sessions:** `POST /api/v1/auth/login` sets an HttpOnly, `SameSite=Strict` session cookie (`__Host-nexora_session`
+  over HTTPS, `nexora_session` in plain-HTTP development). The token is opaque; the server stores only its hash.
+- **CSRF:** every state-changing request (`POST`, `PATCH`, `DELETE`) authenticated by the cookie must send
+  `X-CSRF-Token` with the `csrfToken` from `GET /api/v1/auth/session` (or the login response). Keep it in memory.
+  Unsafe requests from other origins (`Origin` / `Sec-Fetch-Site`) are rejected with `403 CSRF_FAILED`, including
+  login and setup.
+- **Authorisation:** every non-public route requires a session (`401 UNAUTHENTICATED`) and declares the capabilities
+  it needs (`403 FORBIDDEN`). Capabilities are evaluated on every request, so role changes apply immediately.
+- **Rate limits:** sign-in (per IP and per account), password reset and setup return `429 RATE_LIMITED` with
+  `Retry-After` when exceeded.
+
+## Endpoints
+
+| Method | Path | Access | Description |
 |---|---|---|---|
-| GET | `/api/v1/health/live` | public | Liveness: the process is up. No dependency checks. Always 200 while serving. |
-| GET | `/api/v1/health/ready` | public | Readiness: database reachable, all shipped migrations applied (none failed), optional cache, not shutting down. 200 for `ok`/`degraded`, 503 for `error`. Results are shared for up to 1 second. |
-| GET | `/api/v1/system/status` | public | `{ "installed": boolean }`: whether initial setup has been completed. 503 if the database is unavailable. |
+| GET | `/api/v1/health/live` | public | Liveness |
+| GET | `/api/v1/health/ready` | public | Readiness (200 `ok`/`degraded`, 503 `error`) |
+| GET | `/api/v1/system/status` | public | `{ installed }` |
+| GET | `/api/v1/setup/status` | public | Wizard checks; only `{ installed: true }` once installed |
+| POST | `/api/v1/setup/install` | public + setup token | One-time installation (409 afterwards) |
+| POST | `/api/v1/auth/login` | public | Sign in; returns the session payload |
+| POST | `/api/v1/auth/logout` | session | Revoke the current session |
+| GET | `/api/v1/auth/session` | public | Current session, capabilities, CSRF token — or `{ authenticated: false }` |
+| POST | `/api/v1/auth/password-reset/request` | public | Email a reset link (same 202 response for unknown accounts) |
+| POST | `/api/v1/auth/password-reset/confirm` | public + token | Set a new password; signs out all sessions |
+| GET/PATCH | `/api/v1/account/profile` | session | Own profile |
+| POST | `/api/v1/account/password` | session | Change own password (re-verifies; rotates session) |
+| GET | `/api/v1/account/sessions` | session | Own active sessions |
+| DELETE | `/api/v1/account/sessions/{id}` | session | Revoke one own session |
+| POST | `/api/v1/account/sessions/revoke-others` | session | Sign out all other sessions |
+| GET | `/api/v1/users` | `users.read` | List users (`search`, `status`, `roleId`, `page`, `pageSize`) |
+| POST | `/api/v1/users` | `users.create` | Create a user (role must be within the actor's capabilities) |
+| GET | `/api/v1/users/{id}` | `users.read` | Get a user |
+| PATCH | `/api/v1/users/{id}` | `users.update` (+ `users.assign_roles` for role changes) | Name, status, role |
+| POST | `/api/v1/users/{id}/password` | `users.update` | Set another user's password |
+| GET | `/api/v1/users/{id}/sessions` | `sessions.manage` | A user's active sessions |
+| POST | `/api/v1/users/{id}/sessions/revoke-all` | `sessions.manage` | Sign a user out everywhere |
+| GET | `/api/v1/roles` | `roles.read` | Roles and the capability registry |
+| POST | `/api/v1/roles` | `roles.manage` | Create a custom role |
+| PATCH | `/api/v1/roles/{id}` | `roles.manage` | Update a role (built-in: capabilities/description only) |
+| DELETE | `/api/v1/roles/{id}` | `roles.manage` | Delete an unused custom role |
+| GET | `/api/v1/audit-events` | `audit.read` | Audit log (`action` prefix, `actorId`, paging) |
+| GET/PATCH | `/api/v1/settings/site` | `system.manage` | Site name and public base URL |
 
-Readiness example:
-
-```json
-{
-  "status": "ok",
-  "checkedAt": "2026-10-31T09:20:06.267Z",
-  "checks": {
-    "database": { "status": "up", "latencyMs": 3 },
-    "migrations": { "status": "up", "pending": 0, "failed": 0 },
-    "cache": { "status": "disabled" },
-    "shutdown": { "status": "up" }
-  }
-}
-```
+Privilege-escalation rules apply on top of capabilities: nobody can grant capabilities they do not hold, manage a user
+who holds capabilities they lack, change their own role or status, edit their own role, or remove the last active
+Super Administrator (409).
