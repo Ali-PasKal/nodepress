@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseCommandLine } from './args.ts';
 import { checkNodeVersion, endpointOf, satisfiesRange } from './commands/doctor.ts';
 import { isMigrateAction } from './commands/migrate.ts';
+import { describeDockerProblem } from './docker.ts';
 import { resolveCommand } from './process.ts';
 
 const BIN = fileURLToPath(new URL('../bin/nexora.js', import.meta.url));
@@ -169,5 +170,33 @@ describe('resolveCommand (cross-platform process launching)', () => {
     });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /letters, digits and underscores/);
+  });
+});
+
+describe('docker diagnostics', () => {
+  it('explains each failure mode with a specific fix and the --no-infra alternative', () => {
+    assert.match(
+      describeDockerProblem('missing'),
+      /not found on PATH.*Docker Desktop.*NEW terminal/s,
+    );
+    assert.match(describeDockerProblem('no-compose'), /Compose v2 plugin/);
+    assert.match(
+      describeDockerProblem('engine-stopped'),
+      /engine is not running.*Start Docker Desktop/s,
+    );
+    for (const state of ['missing', 'no-compose', 'engine-stopped'] as const) {
+      assert.match(describeDockerProblem(state), /nexora dev --no-infra/);
+    }
+  });
+
+  it('reports a missing Docker installation before creating any files', () => {
+    // An empty PATH guarantees `docker` cannot be found, on every platform.
+    const result = spawnSync(process.execPath, [BIN, 'dev'], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: '', Path: '' },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Docker was not found on PATH/);
+    assert.doesNotMatch(result.stdout, /Created \.env/);
   });
 });

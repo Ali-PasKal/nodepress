@@ -48,6 +48,12 @@ The toolchain works on Windows 10/11 (PowerShell) with Docker Desktop:
 - If PowerShell refuses to run `pnpm` ("running scripts is disabled on this system"), run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or call `pnpm.cmd` instead.
 - Always invoke the CLI as `pnpm nexora …` (pnpm passes its own location to the CLI, so no shell or `.cmd` shim is needed).
 - Clone after installing Git with default settings; `.gitattributes` keeps LF line endings in the working tree.
+- **Without Docker:** install PostgreSQL 16 or 17 for Windows (the EDB installer includes `psql`), create the development role and database, comment out `REDIS_URL` in `.env` (the cache is optional), then run `pnpm nexora dev --no-infra`:
+
+  ```bash
+  psql -U postgres -c "CREATE ROLE nexora LOGIN PASSWORD 'nexora_dev_password' CREATEDB;" -c "CREATE DATABASE nexora OWNER nexora;"
+  ```
+
 - If a local PostgreSQL Windows service already uses port 5432, either stop it or set `POSTGRES_PORT` (and the port in `DATABASE_URL`) in `.env`.
 
 ## CLI reference

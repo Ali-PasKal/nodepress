@@ -1,20 +1,24 @@
 import { copyFileSync, existsSync } from 'node:fs';
 import { ENV_EXAMPLE_FILE, ENV_FILE } from '../env-file.ts';
 import { color, fail, heading } from '../output.ts';
-import { isAvailable, run, runSteps } from '../process.ts';
+import { describeDockerProblem, detectDocker } from '../docker.ts';
+import { run, runSteps } from '../process.ts';
 
 export async function dev(options: { infra: boolean }): Promise<number> {
+  // Check prerequisites before touching the workspace.
+  if (options.infra) {
+    const docker = await detectDocker();
+    if (docker !== 'ready') {
+      fail(describeDockerProblem(docker));
+    }
+  }
+
   if (!existsSync(ENV_FILE)) {
     copyFileSync(ENV_EXAMPLE_FILE, ENV_FILE);
     console.log(`${color.yellow('!')} Created .env from .env.example (development defaults only).`);
   }
 
   if (options.infra) {
-    if (!(await isAvailable('docker', ['compose', 'version']))) {
-      fail(
-        'Docker Compose is not available. Start PostgreSQL yourself and run "nexora dev --no-infra".',
-      );
-    }
     heading('Starting PostgreSQL and Valkey (docker compose)');
     const code = await run('docker', ['compose', 'up', '--detach', '--wait', 'postgres', 'valkey']);
     if (code !== 0) {

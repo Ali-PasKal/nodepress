@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { effectiveEnv, readEnvFile } from '../env-file.ts';
 import { color, heading } from '../output.ts';
+import { describeDockerProblem, detectDocker } from '../docker.ts';
 import { isAvailable, REPO_ROOT } from '../process.ts';
 
 export type CheckLevel = 'ok' | 'warn' | 'fail';
@@ -174,13 +175,12 @@ export async function runDoctorChecks(): Promise<CheckResult[]> {
     detail: 'required to install dependencies and run workspace scripts',
   });
 
-  const docker = await isAvailable('docker', ['compose', 'version']);
+  const docker = await detectDocker();
   results.push({
-    name: 'Docker Compose',
-    level: docker ? 'ok' : 'warn',
-    detail: docker
-      ? 'available'
-      : 'not available; provide PostgreSQL yourself and run "nexora dev --no-infra"',
+    name: 'Docker',
+    level: docker === 'ready' ? 'ok' : 'warn',
+    detail:
+      docker === 'ready' ? 'engine running, Compose v2 available' : describeDockerProblem(docker),
   });
 
   const fileEnv = readEnvFile();

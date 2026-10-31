@@ -83,10 +83,14 @@ export async function runSteps(
   return 0;
 }
 
-/** Resolves true if `command --version` exits successfully. */
+/**
+ * Resolves true if the command exits successfully. With `timeoutMs`, a command that has not finished
+ * by then is killed and treated as unavailable.
+ */
 export function isAvailable(
   command: string,
   args: readonly string[] = ['--version'],
+  timeoutMs?: number,
 ): Promise<boolean> {
   const resolved = resolveCommand(command, args);
   return new Promise((resolve) => {
@@ -94,10 +98,19 @@ export function isAvailable(
       stdio: 'ignore',
       shell: resolved.shell,
     });
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            child.kill();
+            resolve(false);
+          }, timeoutMs);
     child.on('error', () => {
+      clearTimeout(timer);
       resolve(false);
     });
     child.on('close', (code) => {
+      clearTimeout(timer);
       resolve(code === 0);
     });
   });
