@@ -40,7 +40,7 @@ Node `.gitignore`. It was treated as a new project; the licence and the existing
 | 12 | Admin runs under a strict CSP (`script-src 'self'`, no `unsafe-eval`) with zero violations | ✅ E2E "runs without Content Security Policy violations" on all 3 viewports |
 | 13 | Docker: dev services (PostgreSQL 17, Valkey 8) via Compose; production-like `app` profile (migrate → api → admin/nginx) builds and runs healthy; containers non-root with read-only root filesystems | ✅ images built locally; `docker compose --profile app up` reached healthy; verified uid 1000 and a read-only rootfs |
 | 14 | Developer CLI with real commands only (`dev`, `build`, `test`, `lint`, `typecheck`, `migrate`, `doctor`) | ✅ 10 node:test tests; `doctor`, `migrate status/check` and `dev --no-infra` run manually |
-| 15 | CI workflow: lint, format, typecheck, build, unit + integration (PostgreSQL + Valkey services), drift check, E2E, dependency audit, image builds | ✅ `.github/workflows/ci.yml`. Run #1 on GitHub: tests (incl. E2E), audit and image builds passed; lint failed on the clean runner and was fixed (see below) |
+| 15 | CI workflow: lint, format, typecheck, build, unit + integration (PostgreSQL + Valkey services), drift check, E2E, dependency audit, image builds | ✅ `.github/workflows/ci.yml`. Run #1 on GitHub: lint failed on the clean runner (fixed, see below); run #2: all jobs green |
 | 16 | Docs: development setup, environment variables, API conventions, security, project status | ✅ `docs/` |
 
 ### Verification run (2026-10-31, local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16.15, Redis 7)
@@ -89,7 +89,7 @@ Issues found and fixed during verification (each now covered by a test):
 
 ### Known limitations and caveats (honest list)
 
-- **CI on GitHub:** run #1 (commit `d2b4f86`) passed the test job (unit, integration, drift check, E2E on 3 viewports), the audit, and all image builds; the lint job failed as described above. The fix is in the follow-up commit; confirm that run is green.
+- **CI on GitHub:** run #1 (commit `d2b4f86`) passed the test job (unit, integration, drift check, E2E on 3 viewports), the audit, and all image builds; the lint job failed as described above. Run #2 (commit `57d5e1b`, with the fix) passed **all four jobs** on GitHub.
 - **Docker images were built in a sandbox** that needed host networking and a proxy CA; standard CI runners should not need either. Base images use major tags (`node:22-alpine`, `postgres:17-alpine`); pin digests before production (M8).
 - **Local tests ran against PostgreSQL 16**, while Compose and CI use PostgreSQL 17. The schema uses nothing version-specific.
 - **API runtime image is large** (~750 MB uncompressed) because pnpm links the Prisma CLI as an optional peer of `@prisma/client` (R-07).
