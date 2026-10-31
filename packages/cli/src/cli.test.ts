@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parseCommandLine } from './args.ts';
-import { endpointOf, satisfiesRange } from './commands/doctor.ts';
+import { checkNodeVersion, endpointOf, satisfiesRange } from './commands/doctor.ts';
 import { isMigrateAction } from './commands/migrate.ts';
 import { resolveCommand } from './process.ts';
 
@@ -31,13 +31,21 @@ describe('parseCommandLine', () => {
 
 describe('doctor helpers', () => {
   it('evaluates engines ranges like the root package.json uses', () => {
-    const range = '^22.22.2 || ^24.15.0 || >=26.0.0';
-    for (const ok of ['22.22.2', 'v22.23.4', '24.15.0', '24.20.1', '26.0.0', '27.1.0']) {
+    const range = '^22.22.0 || >=23.6.0';
+    for (const ok of ['22.22.0', 'v22.23.4', '23.6.0', '23.7.0', '24.0.0', '26.1.0']) {
       assert.equal(satisfiesRange(ok, range), true, ok);
     }
-    for (const bad of ['22.22.1', '22.9.0', '23.7.0', '24.14.9', '25.2.0', '20.19.0']) {
+    for (const bad of ['22.21.9', '22.9.0', '23.5.0', '20.19.0']) {
       assert.equal(satisfiesRange(bad, range), false, bad);
     }
+  });
+
+  it('accepts LTS releases, warns on non-LTS releases, and fails outside the range', () => {
+    const range = '^22.22.0 || >=23.6.0';
+    assert.equal(checkNodeVersion('22.23.4', range).level, 'ok');
+    assert.equal(checkNodeVersion('24.15.0', range).level, 'ok');
+    assert.equal(checkNodeVersion('23.7.0', range).level, 'warn');
+    assert.equal(checkNodeVersion('22.12.0', range).level, 'fail');
   });
 
   it('supports comparator sets and rejects malformed input', () => {

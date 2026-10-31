@@ -73,6 +73,29 @@ function satisfiesComparator(actual: Version, comparator: string): boolean {
   }
 }
 
+/**
+ * Node.js check: outside the supported range fails; inside it, odd-numbered (non-LTS) releases get a
+ * warning because they reach end-of-life quickly and some tools declare them unsupported.
+ */
+export function checkNodeVersion(version: string, supportedRange: string): CheckResult {
+  if (!satisfiesRange(version, supportedRange)) {
+    return {
+      name: 'Node.js',
+      level: 'fail',
+      detail: `${version} is not supported (${supportedRange}); install Node.js 22 or 24 LTS`,
+    };
+  }
+  const major = Number.parseInt(version.replace(/^v/, ''), 10);
+  if (major % 2 === 1) {
+    return {
+      name: 'Node.js',
+      level: 'warn',
+      detail: `${version} works, but is not an LTS release (no long-term security fixes); Node.js 22 or 24 LTS is recommended`,
+    };
+  }
+  return { name: 'Node.js', level: 'ok', detail: `${version} (supported: ${supportedRange})` };
+}
+
 /** Extracts host and port from a service URL, applying the protocol's default port. */
 export function endpointOf(
   url: string,
@@ -143,15 +166,7 @@ export async function runDoctorChecks(): Promise<CheckResult[]> {
   const rootPackage = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
     engines: { node: string };
   };
-  const supportedNode = rootPackage.engines.node;
-  const nodeSupported = satisfiesRange(process.versions.node, supportedNode);
-  results.push({
-    name: 'Node.js',
-    level: nodeSupported ? 'ok' : 'fail',
-    detail: nodeSupported
-      ? `${process.versions.node} (supported: ${supportedNode})`
-      : `${process.versions.node} is not supported (${supportedNode}); install the LTS version in .nvmrc`,
-  });
+  results.push(checkNodeVersion(process.versions.node, rootPackage.engines.node));
 
   results.push({
     name: 'pnpm',

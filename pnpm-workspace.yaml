@@ -5,9 +5,12 @@ packages:
 # pnpm 10 blocks dependency lifecycle scripts by default. Only packages that genuinely need an
 # install step are allowed; everything else stays blocked.
 onlyBuiltDependencies:
+  # Downloads the Prisma schema engine used by `prisma migrate`.
   - '@prisma/engines'
-  - prisma
 
-# Explicitly blocked: @scarf/scarf is install-time telemetry pulled in by swagger-ui-dist.
 ignoredBuiltDependencies:
+  # Install-time telemetry pulled in by swagger-ui-dist.
   - '@scarf/scarf'
+  # Its only install script is a Node.js version gate (it rejects Node 23.x even though the CLI works
+  # there); the engines it needs come from @prisma/engines above.
+  - prisma

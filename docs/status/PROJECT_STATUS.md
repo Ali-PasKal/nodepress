@@ -73,6 +73,17 @@ Issues found and fixed during verification (each now covered by a test):
 - **First GitHub CI run:** type-aware lint failed on the clean runner (100 errors) because the Prisma client and `@nexora/shared` types are generated artifacts that did not exist yet; locally they masked the problem. Reproduced by deleting the artifacts, then fixed with a root `codegen` step that `lint`, `typecheck` and `test` all run first.
 - A 393 MB deploy footprint was investigated: `prisma` moved to devDependencies and migrations got a separate `migrator` image target (the residual size is R-07).
 
+### Node.js compatibility (follow-up)
+
+A user on Node 23.7.0 could not install the project. Investigation on a real Node 23.7.0 binary found:
+`engine-strict=true` turned dependencies' declared engines (many tools exclude odd releases on principle)
+into hard errors; Prisma's `preinstall` script is a Node-version gate that rejects 23.x; and jsdom 30
+(test-only) needs `zlib.createZstdDecompress`, which Node 23.7 lacks. Fixes: engines are now warnings
+(the project's own range is `^22.22.0 || >=23.6.0`, checked by `nexora doctor`), Prisma's gate script no
+longer runs (its engines still install via `@prisma/engines`), and jsdom is pinned to 29.1.1. On Node
+23.7.0: fresh install, lint, format, typecheck, build, all unit/integration tests, drift check, the E2E
+suite and `nexora dev` pass. CI now also runs the test suite on Node 23.7.0 and 24.
+
 ### Important files
 
 | Area | Files |
