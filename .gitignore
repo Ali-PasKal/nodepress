@@ -147,3 +147,17 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# --- NEXORA CMS ---
+dist/
+.env
+.env.*
+!.env.example
+apps/api/src/generated/
+uploads/
+storage/
+playwright-report/
+test-results/
+blob-report/
+.vite/
+.DS_Store

@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 10 blocks dependency lifecycle scripts by default. Only packages that genuinely need an
+# install step are allowed; everything else stays blocked.
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - prisma
+
+# Explicitly blocked: @scarf/scarf is install-time telemetry pulled in by swagger-ui-dist.
+ignoredBuiltDependencies:
+  - '@scarf/scarf'

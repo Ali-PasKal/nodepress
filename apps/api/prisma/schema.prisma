@@ -1,0 +1,29 @@
+// NEXORA CMS database schema.
+//
+// Conventions:
+// - Table and column names are snake_case in PostgreSQL (@@map / @map); Prisma models are PascalCase.
+// - Constraints Prisma cannot express (CHECK constraints) live in migration SQL and are covered by tests.
+// - The connection URL is supplied by prisma.config.ts (migrations) and by the driver adapter (runtime).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Instance-wide installation state. Exactly one row may exist (enforced by CHECK (id = 1)).
+/// Written by the setup wizard (Milestone 2); read by the public system status endpoint.
+model SystemState {
+  id               Int       @id @default(1) @db.SmallInt
+  installedAt      DateTime? @map("installed_at") @db.Timestamptz(3)
+  installedVersion String?   @map("installed_version") @db.VarChar(64)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("system_state")
+}

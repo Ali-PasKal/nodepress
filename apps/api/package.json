@@ -1,0 +1,58 @@
+{
+  "name": "@nexora/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NEXORA CMS HTTP API (NestJS modular monolith)",
+  "type": "module",
+  "files": [
+    "dist",
+    "prisma",
+    "prisma.config.ts"
+  ],
+  "scripts": {
+    "build": "pnpm run db:generate && tsc -p tsconfig.build.json",
+    "dev": "pnpm run db:generate && tsc-watch -p tsconfig.build.json --onSuccess \"node --env-file-if-exists=../../.env --enable-source-maps dist/main.js\"",
+    "start": "node --enable-source-maps dist/main.js",
+    "typecheck": "pnpm run db:generate && tsc --noEmit",
+    "test": "pnpm run db:generate && vitest run",
+    "openapi:export": "node --enable-source-maps dist/scripts/export-openapi.js",
+    "db:generate": "prisma generate",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:status": "prisma migrate status",
+    "db:migrate:reset": "prisma migrate reset",
+    "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-express": "12.3.2",
+    "@nestjs/swagger": "12.0.5",
+    "@nexora/shared": "workspace:*",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "express": "5.3.0",
+    "helmet": "8.3.0",
+    "ioredis": "6.0.0",
+    "nestjs-pino": "5.3.1",
+    "pino": "10.4.0",
+    "pino-http": "11.0.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "12.3.2",
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "@types/supertest": "7.2.1",
+    "pg": "8.23.1",
+    "pino-pretty": "13.2.0",
+    "prisma": "7.10.1",
+    "supertest": "7.3.1",
+    "tsc-watch": "7.2.1",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  }
+}

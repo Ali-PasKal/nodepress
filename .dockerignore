@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/coverage
+**/playwright-report
+**/test-results
+**/.vite
+**/*.tsbuildinfo
+apps/api/src/generated
+.git
+.github
+.env
+.env.*
+!.env.example
+docs
+*.log

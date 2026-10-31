@@ -1,0 +1,119 @@
+# NEXORA CMS — local development services.
+#
+#   docker compose up -d                       PostgreSQL + Valkey for local development
+#   docker compose --profile app up --build    Production-like full stack (migrate, api, admin)
+#
+# Ports are bound to 127.0.0.1 only, so the services are not exposed to the local network.
+name: nexora
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-nexora}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # Redis-compatible cache (BSD-licensed Valkey). Optional for the CMS; used for caching and
+  # distributed rate limiting when available. Ephemeral by design: no persistence.
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command:
+      [
+        'valkey-server',
+        '--save',
+        '',
+        '--appendonly',
+        'no',
+        '--maxmemory',
+        '256mb',
+        '--maxmemory-policy',
+        'allkeys-lru',
+      ]
+    ports:
+      - '127.0.0.1:${VALKEY_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ---------------------------------------------------------------------------------------------
+  # Production-like full stack. The API runs with NODE_ENV=production, so it refuses to start with
+  # the development password from .env.example: set a strong POSTGRES_PASSWORD first.
+  # ---------------------------------------------------------------------------------------------
+  migrate:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+      target: migrator
+    image: nexora/api-migrator:local
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nexora}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nexora}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+      target: runtime
+    image: nexora/api:local
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nexora}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nexora}
+      REDIS_URL: redis://valkey:6379
+      # The admin container's nginx is the single trusted proxy hop in this topology.
+      TRUST_PROXY: '1'
+      TRUST_REQUEST_ID_HEADER: 'true'
+      SHUTDOWN_DELAY_MS: '2000'
+      LOG_LEVEL: info
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+
+  admin:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: infrastructure/docker/admin.Dockerfile
+    image: nexora/admin:local
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${APP_PORT:-8080}:8080'
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+
+volumes:
+  postgres-data:

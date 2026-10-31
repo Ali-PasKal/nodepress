@@ -1,0 +1,333 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/health/live": {
+      "get": {
+        "description": "Reports that the process is running and able to serve HTTP. Performs no dependency checks.",
+        "operationId": "HealthController_live_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ok"]
+                    }
+                  },
+                  "required": ["status"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "summary": "Liveness probe",
+        "tags": ["health"]
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "description": "Checks the database connection, that all shipped migrations are applied, the optional cache, and whether the process is shutting down. Returns 503 when the instance should not receive traffic.",
+        "operationId": "HealthController_ready_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Ready (status \"ok\" or \"degraded\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ok", "degraded", "error"]
+                    },
+                    "checkedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["up", "down", "disabled"]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": false
+                        },
+                        "migrations": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["up", "down", "disabled"]
+                            },
+                            "pending": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "failed": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": false
+                        },
+                        "cache": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["up", "down", "disabled"]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": false
+                        },
+                        "shutdown": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["up", "down"]
+                            }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["database", "migrations", "cache", "shutdown"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["status", "checkedAt", "checks"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready (status \"error\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ok", "degraded", "error"]
+                    },
+                    "checkedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["up", "down", "disabled"]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": false
+                        },
+                        "migrations": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["up", "down", "disabled"]
+                            },
+                            "pending": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "failed": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": false
+                        },
+                        "cache": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["up", "down", "disabled"]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": false
+                        },
+                        "shutdown": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["up", "down"]
+                            }
+                          },
+                          "required": ["status"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["database", "migrations", "cache", "shutdown"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["status", "checkedAt", "checks"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "summary": "Readiness probe",
+        "tags": ["health"]
+      }
+    },
+    "/api/v1/system/status": {
+      "get": {
+        "description": "Public, unauthenticated. Reports whether initial setup has been completed so clients can route to the setup wizard. Deliberately exposes no version or environment details.",
+        "operationId": "SystemController_getStatus_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "installed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["installed"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "BAD_REQUEST",
+                            "VALIDATION_FAILED",
+                            "UNAUTHENTICATED",
+                            "FORBIDDEN",
+                            "NOT_FOUND",
+                            "METHOD_NOT_ALLOWED",
+                            "CONFLICT",
+                            "PAYLOAD_TOO_LARGE",
+                            "UNSUPPORTED_MEDIA_TYPE",
+                            "RATE_LIMITED",
+                            "REQUEST_TIMEOUT",
+                            "SERVICE_UNAVAILABLE",
+                            "INTERNAL_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["path", "message"],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": ["code", "message"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "summary": "Installation status",
+        "tags": ["system"]
+      }
+    }
+  },
+  "info": {
+    "title": "NEXORA CMS API",
+    "description": "Management and delivery API for NEXORA CMS. All error responses use the `{ error: { code, message, requestId } }` envelope.",
+    "version": "1",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "schemas": {}
+  }
+}

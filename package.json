@@ -1,0 +1,41 @@
+{
+  "name": "nexora-cms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NEXORA CMS — extensible content management system and visual website builder",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.22.0",
+    "pnpm": ">=10.28.0"
+  },
+  "scripts": {
+    "nexora": "nexora",
+    "build:shared": "pnpm --filter @nexora/shared run build",
+    "build": "pnpm -r run build",
+    "dev": "nexora dev",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm run build:shared && pnpm -r run typecheck",
+    "test": "pnpm run build:shared && pnpm -r run test",
+    "test:e2e": "pnpm --filter @nexora/admin run test:e2e",
+    "db:migrate": "pnpm --filter @nexora/api run db:migrate:deploy",
+    "db:check-drift": "pnpm --filter @nexora/api run db:check-drift",
+    "audit:prod": "pnpm audit --prod --audit-level=high"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@nexora/cli": "workspace:*",
+    "@types/node": "22.20.5",
+    "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.7",
+    "globals": "17.13.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}
