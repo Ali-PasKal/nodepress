@@ -300,7 +300,7 @@ development transports only, expired security records were never purged, and the
 | 9 | Unsafe rich text rejected | ✅ shared `content.test.ts` (hostile nodes, marks, URLs, 50 000-level nesting), `entries.test.ts`, admin `content-ui.test.tsx` |
 | 10 | Upload validation, re-encoding, variants, limits, safe serving, local and S3 drivers | ✅ `media.test.ts` (6 tests × local and S3-compatible storage); Compose stack through nginx |
 | 11 | Admin UI against the real API, responsive at 375/768/1280 | ✅ 61 Vitest/RTL tests; 88 Playwright tests (setup + 29 × 3 viewports) |
-| 12 | All checks on Node 22 and 23.7; Compose with a separate worker; CI green | ✅ local (below); CI: see "Known limitations" |
+| 12 | All checks on Node 22 and 23.7; Compose with a separate worker; CI green | ✅ local (below); GitHub CI run #16: all six jobs green |
 
 ### Verification run (2026-11-01, local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.0)
 
@@ -359,7 +359,10 @@ Issues found and fixed during M3 verification:
   none has reported for 90 seconds.
 - **MinIO images are no longer published on Docker Hub**, so S3 tests use `adobe/s3mock`; real AWS S3 was not tested.
 - Local tests ran against PostgreSQL 16; CI and Compose use 17.
-- **GitHub CI:** CI_RESULT
+- **GitHub CI:** runs #13 and #14 failed (the storage drivers were missing from git, see above) and run #15 failed
+  one E2E test on the mobile viewport (the command-palette race). Run #16 (commit `36d341f`) passed all six jobs:
+  lint/format/typecheck/build/bundle budget, unit + integration (with PostgreSQL, Valkey and s3mock) + drift + E2E,
+  Node 23.7.0 and 24 compatibility, dependency audit, container images.
 
 ### Security considerations for M3
 New controls (rich-text allowlist, content policy, upload validation and safe serving, secret-free job payloads,
