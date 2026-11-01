@@ -3,7 +3,12 @@ import type { Server } from 'node:http';
 import { createApp, type CreateAppOptions } from '../../src/bootstrap/create-app.js';
 import type { AppConfig } from '../../src/config/app-config.js';
 import { loadConfig } from '../../src/config/env.schema.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { TEST_DATABASE_URL } from './test-env.js';
+
+export const TEST_MEDIA_DIR = mkdtempSync(join(tmpdir(), 'nexora-test-media-'));
 
 export interface TestApp {
   readonly app: NestExpressApplication;
@@ -27,6 +32,9 @@ export async function createTestApp(
     DATABASE_URL: TEST_DATABASE_URL,
     DATABASE_CONNECT_TIMEOUT_MS: '1000',
     HEALTH_CHECK_TIMEOUT_MS: '1500',
+    // Tests drive the worker explicitly (JobWorker.drain/start) so results are deterministic.
+    JOBS_WORKER: 'off',
+    MEDIA_LOCAL_DIR: TEST_MEDIA_DIR,
     ...overrides,
   });
   const app = await createApp(config, options);

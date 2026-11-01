@@ -96,7 +96,7 @@ describe('capabilities and privilege escalation', () => {
       expect(response.status, path).toBe(403);
       expect(response.body.error.code).toBe('FORBIDDEN');
     }
-    expect(viewer.capabilities).toEqual(['dashboard.access']);
+    expect(viewer.capabilities).toEqual(['content.read', 'dashboard.access']);
   });
 
   it('site settings are reserved for super administrators', async () => {

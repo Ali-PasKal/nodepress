@@ -1,9 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { z } from 'zod';
 import { ApiException } from '../../common/errors/api-exception.js';
 import { RateLimitedException } from '../../common/errors/rate-limited.exception.js';
 import type { RequestMeta } from '../../common/http/request-meta.js';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { defineJob, PermanentJobError } from '../jobs/job-definition.js';
+import { JobQueue } from '../jobs/job-queue.service.js';
+import { JobRegistry } from '../jobs/job-registry.service.js';
 import { Mailer } from '../mail/mailer.service.js';
 import { generateToken, sha256 } from '../security/crypto.js';
 import { PasswordHasher } from '../security/password-hasher.service.js';
@@ -15,12 +19,21 @@ export const PASSWORD_RESET_TTL_MS = 30 * 60_000;
 const INVALID_LINK = 'This password reset link is invalid or has expired. Request a new one.';
 
 /**
+ * Issues the reset token and sends the email. The token is created by the job, not the request, so it
+ * exists in plain text only in memory and in the email: job payloads (stored in the database) never hold it.
+ */
+export const PasswordResetEmailJob = defineJob(
+  'auth.password_reset_email',
+  z.object({ userId: z.uuid() }),
+);
+
+/**
  * Self-service password reset with single-use, hashed, short-lived tokens. The request endpoint
- * responds identically whether or not the account exists; the email is sent in the background so
- * response timing does not reveal it either.
+ * responds identically whether or not the account exists; the email is produced by a background job so
+ * response timing does not reveal it either, and a crash cannot lose it.
  */
 @Injectable()
-export class PasswordResetService {
+export class PasswordResetService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly hasher: PasswordHasher,
@@ -29,7 +42,15 @@ export class PasswordResetService {
     private readonly limiter: RateLimiter,
     private readonly audit: AuditService,
     private readonly mailer: Mailer,
+    private readonly registry: JobRegistry,
+    private readonly queue: JobQueue,
   ) {}
+
+  onModuleInit(): void {
+    this.registry.register(PasswordResetEmailJob, ({ userId }) => this.sendResetEmail(userId), {
+      maxAttempts: 6,
+    });
+  }
 
   async request(email: string, meta: RequestMeta): Promise<void> {
     const ipState = await this.limiter.hit(
@@ -58,34 +79,51 @@ export class PasswordResetService {
       return;
     }
 
-    const token = generateToken(32);
     await this.prisma.$transaction(async (tx) => {
-      // Only the newest link works.
-      await tx.passwordResetToken.updateMany({
-        where: { userId: user.id, usedAt: null },
-        data: { usedAt: new Date() },
-      });
-      await tx.passwordResetToken.create({
-        data: {
-          userId: user.id,
-          tokenHash: sha256(token),
-          expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
-        },
-      });
       await this.audit.record(tx, {
         action: 'auth.password_reset_requested',
         targetType: 'user',
         targetId: user.id,
         request: meta,
       });
+      await this.queue.enqueue(tx, PasswordResetEmailJob, { userId: user.id });
     });
+  }
 
+  /** Job handler. Each attempt issues a fresh token (older links stop working). */
+  private async sendResetEmail(userId: string): Promise<void> {
+    const [user, site] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, status: true } }),
+      this.sites.findDefault(),
+    ]);
+    if (!site) {
+      throw new PermanentJobError('The site is not installed');
+    }
+    if (user?.status !== 'active') {
+      // Suspended or removed since the request: nothing to send.
+      return;
+    }
+    const token = generateToken(32);
+    await this.prisma.$transaction(async (tx) => {
+      // Only the newest link works.
+      await tx.passwordResetToken.updateMany({
+        where: { userId, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      await tx.passwordResetToken.create({
+        data: {
+          userId,
+          tokenHash: sha256(token),
+          expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+        },
+      });
+    });
     const link = `${site.baseUrl}/admin/reset-password?token=${encodeURIComponent(token)}`;
-    this.mailer.sendInBackground({
-      to: email,
+    await this.mailer.send({
+      to: user.email,
       subject: `Reset your ${site.name} password`,
       text: [
-        `Someone (hopefully you) asked to reset the password for ${email} on ${site.name}.`,
+        `Someone (hopefully you) asked to reset the password for ${user.email} on ${site.name}.`,
         '',
         `Choose a new password: ${link}`,
         '',

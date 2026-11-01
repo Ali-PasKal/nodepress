@@ -50,10 +50,55 @@ export interface AppConfig {
     readonly token: string | null;
   };
   readonly mail: {
-    readonly transport: 'log' | 'file' | 'disabled';
+    readonly transport: 'log' | 'file' | 'smtp' | 'disabled';
     readonly fileDir: string;
     readonly from: string;
+    /** Present when transport is "smtp". */
+    readonly smtp: SmtpConfig | null;
   };
+  readonly jobs: {
+    /** "embedded": this process runs a worker; "off": jobs are only enqueued (a separate worker runs them). */
+    readonly worker: 'embedded' | 'off';
+    readonly concurrency: number;
+    readonly pollIntervalMs: number;
+    /** A running job whose worker has not finished it within this time is considered abandoned. */
+    readonly lockTimeoutMs: number;
+    readonly retryBaseMs: number;
+    readonly shutdownGraceMs: number;
+  };
+  readonly media: {
+    readonly storage: 'local' | 's3';
+    readonly localDir: string;
+    readonly maxUploadBytes: number;
+    /** Public URL prefix for stored files (e.g. a CDN or public bucket); null = served by the API at /uploads. */
+    readonly publicBaseUrl: string | null;
+    readonly s3: S3Config | null;
+  };
+  readonly content: {
+    readonly trashRetentionDays: number;
+    readonly revisionLimit: number;
+  };
+}
+
+export interface SmtpConfig {
+  readonly host: string;
+  readonly port: number;
+  /** Implicit TLS (usually port 465). */
+  readonly secure: boolean;
+  /** Require STARTTLS when not using implicit TLS. */
+  readonly requireTls: boolean;
+  readonly rejectUnauthorized: boolean;
+  readonly user: string | null;
+  readonly password: string | null;
+}
+
+export interface S3Config {
+  readonly bucket: string;
+  readonly region: string;
+  readonly endpoint: string | null;
+  readonly accessKeyId: string | null;
+  readonly secretAccessKey: string | null;
+  readonly forcePathStyle: boolean;
 }
 
 /** Injection token for the AppConfig object. */

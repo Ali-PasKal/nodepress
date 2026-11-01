@@ -15,6 +15,38 @@ export const CORE_CAPABILITIES = {
   'sessions.manage': { category: 'security', description: "View and revoke other users' sessions" },
   'audit.read': { category: 'security', description: 'View the audit log' },
   'system.manage': { category: 'system', description: 'Change site-wide settings' },
+  'content.read': {
+    category: 'content',
+    description: "View all content in the dashboard, including other users' drafts",
+  },
+  'content.create': { category: 'content', description: 'Create content and edit own drafts' },
+  'content.publish': {
+    category: 'content',
+    description: 'Publish, schedule and unpublish content, and edit own published content',
+  },
+  'content.edit_others': {
+    category: 'content',
+    description: 'Edit content written by other users',
+  },
+  'content.delete': {
+    category: 'content',
+    description:
+      'Move content to the trash, restore it and delete it permanently (within the edit rules)',
+  },
+  'terms.manage': {
+    category: 'content',
+    description: 'Create, edit and delete categories, tags and other terms',
+  },
+  'content_types.manage': {
+    category: 'content',
+    description: 'Define content types, custom fields and taxonomies',
+  },
+  'media.upload': { category: 'media', description: 'Upload media and edit or delete own uploads' },
+  'media.manage': {
+    category: 'media',
+    description: 'Edit and delete media uploaded by other users',
+  },
+  'jobs.manage': { category: 'system', description: 'View and retry background jobs' },
 } as const satisfies Record<string, { category: string; description: string }>;
 
 export type CoreCapability = keyof typeof CORE_CAPABILITIES;
@@ -30,3 +62,34 @@ export const SYSTEM_ROLE_KEYS = [
   'viewer',
 ] as const;
 export type SystemRoleKey = (typeof SYSTEM_ROLE_KEYS)[number];
+
+/**
+ * Capabilities of the built-in roles as seeded by the migrations ('all' = grantsAll). Used by tests and
+ * tooling to restore defaults; the migrations are the source of truth for existing installations.
+ */
+export const SYSTEM_ROLE_DEFAULTS: Readonly<
+  Record<SystemRoleKey, 'all' | readonly CoreCapability[]>
+> = {
+  super_admin: 'all',
+  administrator: CORE_CAPABILITY_KEYS.filter((key) => key !== 'system.manage'),
+  editor: [
+    'dashboard.access',
+    'content.read',
+    'content.create',
+    'content.publish',
+    'content.edit_others',
+    'content.delete',
+    'terms.manage',
+    'media.upload',
+    'media.manage',
+  ],
+  author: [
+    'dashboard.access',
+    'content.create',
+    'content.publish',
+    'content.delete',
+    'media.upload',
+  ],
+  contributor: ['dashboard.access', 'content.create', 'content.delete'],
+  viewer: ['dashboard.access', 'content.read'],
+};

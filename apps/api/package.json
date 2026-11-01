@@ -22,7 +22,8 @@
     "db:migrate:status": "prisma migrate status",
     "db:migrate:reset": "prisma migrate reset",
     "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code",
-    "user:reset-password": "node --env-file-if-exists=../../.env --enable-source-maps dist/scripts/reset-password.js"
+    "user:reset-password": "node --env-file-if-exists=../../.env --enable-source-maps dist/scripts/reset-password.js",
+    "start:worker": "node --enable-source-maps dist/worker.js"
   },
   "dependencies": {
     "@nestjs/common": "12.3.2",
@@ -37,6 +38,8 @@
     "helmet": "8.3.0",
     "ioredis": "6.0.0",
     "nestjs-pino": "5.3.1",
+    "nodemailer": "10.1.2",
+    "pg": "8.23.1",
     "pino": "10.4.0",
     "pino-http": "11.0.0",
     "reflect-metadata": "0.2.2",
@@ -46,12 +49,16 @@
   "devDependencies": {
     "@nestjs/testing": "12.3.2",
     "@types/express": "5.0.6",
+    "@types/mailparser": "3.9.0",
     "@types/node": "22.20.5",
+    "@types/nodemailer": "8.0.2",
     "@types/pg": "8.23.1",
+    "@types/smtp-server": "3.5.13",
     "@types/supertest": "7.2.1",
-    "pg": "8.23.1",
+    "mailparser": "3.9.40",
     "pino-pretty": "13.2.0",
     "prisma": "7.10.1",
+    "smtp-server": "3.19.23",
     "supertest": "7.3.1",
     "tsc-watch": "7.2.1",
     "typescript": "6.0.3",

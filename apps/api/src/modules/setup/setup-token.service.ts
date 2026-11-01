@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config.js';
+import { PROCESS_ROLE, type ProcessRole } from '../../config/config.module.js';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
 import { generateToken, sha256 } from '../security/crypto.js';
 
@@ -15,9 +16,14 @@ export class SetupTokenService implements OnApplicationBootstrap {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(PROCESS_ROLE) private readonly role: ProcessRole,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
+    // Only the HTTP API owns the setup token; a standalone worker must not replace it.
+    if (this.role !== 'api') {
+      return;
+    }
     try {
       const state = await this.prisma.systemState.findUnique({
         where: { id: 1 },

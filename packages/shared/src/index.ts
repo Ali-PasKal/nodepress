@@ -12,3 +12,4 @@ export * from './contracts/settings.js';
 export * from './contracts/setup.js';
 export * from './contracts/system.js';
 export * from './contracts/users.js';
+export * from './contracts/jobs.js';

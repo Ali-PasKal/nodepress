@@ -15,9 +15,13 @@ import {
   type SignedIn,
 } from '../helpers/identity.js';
 import type { TestApp } from '../helpers/test-app.js';
+import { JobWorker } from '../../src/modules/jobs/job-worker.service.js';
 
-/** Waits until at least `expected` emails exist (mail is sent in the background), or ~1 s. */
+let worker: JobWorker | undefined;
+
+/** Runs due background jobs (mail is sent by a job), then waits until `expected` emails exist, or ~1 s. */
 async function waitForMail(expected = 1): Promise<{ to: string; subject: string; text: string }[]> {
+  await worker?.drain();
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const files = (await readdir(MAIL_DIR).catch(() => []))
       .filter((name) => name.endsWith('.json'))
@@ -53,6 +57,7 @@ describe('password reset', () => {
   beforeAll(async () => {
     await resetIdentityData();
     testApp = await createIdentityApp();
+    worker = testApp.app.get(JobWorker);
     await install(testApp.server);
     owner = await signIn(testApp.server, OWNER.email, OWNER.password);
     user = await createUser(owner, 'editor');

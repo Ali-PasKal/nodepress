@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
-import { sessionResponseSchema } from '@nexora/shared';
+import { SYSTEM_ROLE_DEFAULTS, sessionResponseSchema } from '@nexora/shared';
 import pg from 'pg';
 import request from 'supertest';
 import { expect } from 'vitest';
@@ -47,15 +47,31 @@ export async function withDb<T>(fn: (db: pg.Client) => Promise<T>): Promise<T> {
  */
 export async function resetIdentityData(): Promise<void> {
   await withDb(async (db) => {
-    await db.query('TRUNCATE users, sites, rate_limit_buckets, audit_events CASCADE');
+    await db.query(
+      'TRUNCATE users, sites, rate_limit_buckets, audit_events, jobs, job_workers CASCADE',
+    );
     await db.query('DELETE FROM roles WHERE NOT is_system');
     await db.query(
       `DELETE FROM role_capabilities rc USING roles r WHERE rc.role_id = r.id AND r.is_system`,
     );
-    await db.query(`INSERT INTO role_capabilities (role_id, capability_key)
-      SELECT r.id, c.key FROM roles r CROSS JOIN capabilities c WHERE r.key = 'administrator' AND c.key <> 'system.manage'`);
-    await db.query(`INSERT INTO role_capabilities (role_id, capability_key)
-      SELECT r.id, 'dashboard.access' FROM roles r WHERE r.key IN ('editor','author','contributor','viewer')`);
+    for (const [roleKey, capabilities] of Object.entries(SYSTEM_ROLE_DEFAULTS)) {
+      if (capabilities === 'all') continue;
+      await db.query(
+        `INSERT INTO role_capabilities (role_id, capability_key)
+           SELECT r.id, unnest($2::text[]) FROM roles r WHERE r.key = $1`,
+        [roleKey, capabilities],
+      );
+    }
+    // Content model: drop custom types and taxonomies, restore the built-in ones.
+    await db.query('DELETE FROM content_types WHERE NOT is_system');
+    await db.query('DELETE FROM taxonomies WHERE NOT is_system');
+    await db.query(`UPDATE content_types SET fields = '[]', has_body = true, has_excerpt = true,
+      has_featured_image = true, hierarchical = (key = 'page')`);
+    await db.query(`UPDATE taxonomies SET hierarchical = (key = 'category')`);
+    await db.query('DELETE FROM content_type_taxonomies');
+    await db.query(`INSERT INTO content_type_taxonomies (content_type_id, taxonomy_id)
+      SELECT ct.id, t.id FROM content_types ct CROSS JOIN taxonomies t
+       WHERE ct.key = 'post' AND t.key IN ('category', 'tag')`);
     await db.query(
       'UPDATE system_state SET installed_at = NULL, installed_version = NULL, setup_token_hash = NULL',
     );

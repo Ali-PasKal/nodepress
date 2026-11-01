@@ -1,10 +1,12 @@
 import {
   CORE_CAPABILITIES,
+  SYSTEM_ROLE_DEFAULTS,
+  SYSTEM_ROLE_KEYS,
   roleListResponseSchema,
   userListResponseSchema,
   userSummarySchema,
 } from '@nexora/shared';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
   createIdentityApp,
   createUser,
@@ -56,7 +58,16 @@ describe('user and role management', () => {
         .filter((key) => key !== 'system.manage')
         .sort(),
     );
-    expect(byKey.viewer!.capabilities).toEqual(['dashboard.access']);
+    expect(byKey.viewer!.capabilities).toEqual(['content.read', 'dashboard.access']);
+  });
+
+  it('the migrations seed exactly the shared default capabilities for every built-in role', () => {
+    const migrated = inject('migratedRoles');
+    expect(Object.keys(migrated).sort()).toEqual([...SYSTEM_ROLE_KEYS].sort());
+    for (const key of SYSTEM_ROLE_KEYS) {
+      const expected = SYSTEM_ROLE_DEFAULTS[key];
+      expect(migrated[key], key).toEqual(expected === 'all' ? 'all' : [...expected].sort());
+    }
   });
 
   it('creates users, rejects duplicates and invalid input, and never returns password data', async () => {

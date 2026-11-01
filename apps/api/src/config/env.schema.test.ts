@@ -191,3 +191,108 @@ describe('identity and mail configuration', () => {
     );
   });
 });
+
+describe('jobs, SMTP and media configuration', () => {
+  it('defaults to an embedded worker, local media storage and the log mail transport in development', () => {
+    const config = loadConfig({ DATABASE_URL: DEV_DB });
+    expect(config.jobs).toMatchObject({
+      worker: 'embedded',
+      concurrency: 2,
+      pollIntervalMs: 5_000,
+    });
+    expect(config.media).toMatchObject({
+      storage: 'local',
+      maxUploadBytes: 25 * 1024 * 1024,
+      publicBaseUrl: null,
+      s3: null,
+    });
+    expect(config.mail.transport).toBe('log');
+    expect(config.content).toEqual({ trashRetentionDays: 30, revisionLimit: 50 });
+  });
+
+  it('uses SMTP by default in production when SMTP_HOST is set, otherwise disables mail', () => {
+    const base = { NODE_ENV: 'production', DATABASE_URL: STRONG_DB };
+    expect(loadConfig(base).mail.transport).toBe('disabled');
+    const config = loadConfig({
+      ...base,
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_USER: 'mailer',
+      SMTP_PASSWORD: 'secret-password',
+      MAIL_FROM: 'Site <no-reply@example.com>',
+    });
+    expect(config.mail.transport).toBe('smtp');
+    expect(config.mail.smtp).toEqual({
+      host: 'smtp.example.com',
+      port: 587,
+      secure: false,
+      requireTls: true,
+      rejectUnauthorized: true,
+      user: 'mailer',
+      password: 'secret-password',
+    });
+  });
+
+  it('refuses SMTP without TLS or certificate checks, and localhost senders, in production', () => {
+    const base = {
+      NODE_ENV: 'production',
+      DATABASE_URL: STRONG_DB,
+      MAIL_TRANSPORT: 'smtp',
+      SMTP_HOST: 'smtp.example.com',
+    };
+    const issues = configError({
+      ...base,
+      SMTP_REQUIRE_TLS: 'false',
+      SMTP_TLS_REJECT_UNAUTHORIZED: 'false',
+    }).issues.join('\n');
+    expect(issues).toMatch(/SMTP_REQUIRE_TLS: SMTP must use TLS in production/);
+    expect(issues).toMatch(/SMTP_TLS_REJECT_UNAUTHORIZED: must be true in production/);
+    expect(issues).toMatch(/MAIL_FROM: must be a real sender address in production/);
+    // Implicit TLS is acceptable without STARTTLS.
+    expect(
+      loadConfig({
+        ...base,
+        SMTP_SECURE: 'true',
+        SMTP_PORT: '465',
+        SMTP_REQUIRE_TLS: 'false',
+        MAIL_FROM: 'no-reply@example.com',
+      }).mail.smtp?.secure,
+    ).toBe(true);
+  });
+
+  it('requires complete SMTP and S3 settings', () => {
+    const issues = configError({
+      DATABASE_URL: DEV_DB,
+      MAIL_TRANSPORT: 'smtp',
+      SMTP_USER: 'only-user',
+      MEDIA_STORAGE: 's3',
+      S3_ACCESS_KEY_ID: 'only-key',
+    }).issues;
+    expect(issues).toContain('SMTP_HOST: is required when MAIL_TRANSPORT is "smtp"');
+    expect(issues).toContain('SMTP_PASSWORD: SMTP_USER and SMTP_PASSWORD must be set together');
+    expect(issues).toContain('S3_BUCKET: is required when MEDIA_STORAGE is "s3"');
+    expect(issues).toContain(
+      'S3_SECRET_ACCESS_KEY: S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together',
+    );
+  });
+
+  it('normalises media and S3 URLs', () => {
+    const config = loadConfig({
+      DATABASE_URL: DEV_DB,
+      MEDIA_STORAGE: 's3',
+      S3_BUCKET: 'nexora-media',
+      S3_ENDPOINT: 'http://127.0.0.1:9000/',
+      S3_FORCE_PATH_STYLE: 'true',
+      MEDIA_PUBLIC_BASE_URL: 'https://cdn.example.com/media/',
+      MEDIA_MAX_UPLOAD_MB: '10',
+    });
+    expect(config.media).toMatchObject({
+      storage: 's3',
+      publicBaseUrl: 'https://cdn.example.com/media',
+      maxUploadBytes: 10 * 1024 * 1024,
+      s3: { bucket: 'nexora-media', endpoint: 'http://127.0.0.1:9000', forcePathStyle: true },
+    });
+    expect(
+      configError({ DATABASE_URL: DEV_DB, MEDIA_PUBLIC_BASE_URL: 'ftp://x' }).issues[0],
+    ).toMatch(/^MEDIA_PUBLIC_BASE_URL: /);
+  });
+});

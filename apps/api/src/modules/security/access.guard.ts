@@ -77,14 +77,16 @@ export class AccessGuard implements CanActivate {
         'The request could not be verified. Reload the page and try again.',
       );
     }
-    for (const capability of policy.capabilities) {
-      if (!auth.capabilities.has(capability)) {
-        throw new ApiException(
-          403,
-          'FORBIDDEN',
-          'You do not have permission to perform this action.',
-        );
-      }
+    const holdsAll = policy.capabilities.every((capability) => auth.capabilities.has(capability));
+    const holdsAny =
+      policy.anyOf === undefined ||
+      policy.anyOf.some((capability) => auth.capabilities.has(capability));
+    if (!holdsAll || !holdsAny) {
+      throw new ApiException(
+        403,
+        'FORBIDDEN',
+        'You do not have permission to perform this action.',
+      );
     }
     return true;
   }

@@ -16,6 +16,27 @@ const KNOWN_DEVELOPMENT_PASSWORDS = new Set([
 ]);
 
 const DEFAULT_MIGRATIONS_DIR = fileURLToPath(new URL('../../prisma/migrations', import.meta.url));
+const DEFAULT_MEDIA_DIR = fileURLToPath(new URL('../../storage/uploads', import.meta.url));
+
+/** http(s) URL used as a prefix; normalised without a trailing slash. */
+const urlPrefix = z
+  .string()
+  .refine(
+    (value) => {
+      try {
+        const url = new URL(value);
+        return (
+          (url.protocol === 'https:' || url.protocol === 'http:') &&
+          url.search === '' &&
+          url.hash === ''
+        );
+      } catch {
+        return false;
+      }
+    },
+    { message: 'must be an http(s) URL without query string or fragment' },
+  )
+  .transform((value) => value.replace(/\/+$/, ''));
 
 const booleanFlag = z
   .enum(['true', 'false', '1', '0'], { message: 'must be one of: true, false, 1, 0' })
@@ -158,13 +179,72 @@ export const envSchema = z
       .max(256)
       .optional(),
 
-    // Mail delivery. "log" and "file" are development transports; SMTP arrives with the job queue (M3).
-    MAIL_TRANSPORT: z.enum(['log', 'file', 'disabled']).optional(),
+    // Mail delivery. "log" and "file" are development transports; "smtp" is the production transport.
+    MAIL_TRANSPORT: z.enum(['log', 'file', 'smtp', 'disabled']).optional(),
     MAIL_FILE_DIR: z.string().min(1).default(join(tmpdir(), 'nexora-mail')),
     MAIL_FROM: z.string().min(3).max(320).default('NEXORA CMS <no-reply@localhost>'),
+    SMTP_HOST: z.string().min(1).max(255).optional(),
+    SMTP_PORT: integer(1, 65_535).default(587),
+    SMTP_SECURE: booleanFlag.default(false),
+    SMTP_REQUIRE_TLS: booleanFlag.default(true),
+    SMTP_TLS_REJECT_UNAUTHORIZED: booleanFlag.default(true),
+    SMTP_USER: z.string().min(1).max(320).optional(),
+    SMTP_PASSWORD: z.string().min(1).max(1024).optional(),
+
+    // Background jobs.
+    JOBS_WORKER: z.enum(['embedded', 'off']).default('embedded'),
+    JOBS_CONCURRENCY: integer(1, 32).default(2),
+    JOBS_POLL_INTERVAL_MS: integer(100, 60_000).default(5_000),
+    JOBS_LOCK_TIMEOUT_MS: integer(1_000, 86_400_000).default(900_000),
+    JOBS_RETRY_BASE_MS: integer(10, 3_600_000).default(15_000),
+    JOBS_SHUTDOWN_GRACE_MS: integer(0, 120_000).default(8_000),
+
+    // Media storage.
+    MEDIA_STORAGE: z.enum(['local', 's3']).default('local'),
+    MEDIA_LOCAL_DIR: z.string().min(1).default(DEFAULT_MEDIA_DIR),
+    MEDIA_MAX_UPLOAD_MB: integer(1, 512).default(25),
+    MEDIA_PUBLIC_BASE_URL: urlPrefix.optional(),
+    S3_BUCKET: z.string().min(3).max(63).optional(),
+    S3_REGION: z.string().min(1).max(64).default('us-east-1'),
+    S3_ENDPOINT: urlPrefix.optional(),
+    S3_ACCESS_KEY_ID: z.string().min(1).max(256).optional(),
+    S3_SECRET_ACCESS_KEY: z.string().min(1).max(256).optional(),
+    S3_FORCE_PATH_STYLE: booleanFlag.default(false),
+
+    // Content.
+    CONTENT_TRASH_RETENTION_DAYS: integer(1, 3650).default(30),
+    CONTENT_REVISIONS_LIMIT: integer(1, 1000).default(50),
     PRISMA_MIGRATIONS_DIR: z.string().min(1).default(DEFAULT_MIGRATIONS_DIR),
   })
   .superRefine((env, ctx) => {
+    if (env.MAIL_TRANSPORT === 'smtp' && env.SMTP_HOST === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SMTP_HOST'],
+        message: 'is required when MAIL_TRANSPORT is "smtp"',
+      });
+    }
+    if ((env.SMTP_USER === undefined) !== (env.SMTP_PASSWORD === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SMTP_PASSWORD'],
+        message: 'SMTP_USER and SMTP_PASSWORD must be set together',
+      });
+    }
+    if (env.MEDIA_STORAGE === 's3' && env.S3_BUCKET === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['S3_BUCKET'],
+        message: 'is required when MEDIA_STORAGE is "s3"',
+      });
+    }
+    if ((env.S3_ACCESS_KEY_ID === undefined) !== (env.S3_SECRET_ACCESS_KEY === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['S3_SECRET_ACCESS_KEY'],
+        message: 'S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together',
+      });
+    }
     if (env.NODE_ENV !== 'production') {
       return;
     }
@@ -198,6 +278,33 @@ export const envSchema = z
         path: ['MAIL_TRANSPORT'],
         message: `"${env.MAIL_TRANSPORT}" writes message contents (including reset links) to disk or logs; not allowed in production`,
       });
+    }
+    const smtpInUse =
+      env.MAIL_TRANSPORT === 'smtp' ||
+      (env.MAIL_TRANSPORT === undefined && env.SMTP_HOST !== undefined);
+    if (smtpInUse) {
+      if (!env.SMTP_SECURE && !env.SMTP_REQUIRE_TLS) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['SMTP_REQUIRE_TLS'],
+          message: 'SMTP must use TLS in production (SMTP_SECURE=true or SMTP_REQUIRE_TLS=true)',
+        });
+      }
+      if (!env.SMTP_TLS_REJECT_UNAUTHORIZED) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['SMTP_TLS_REJECT_UNAUTHORIZED'],
+          message:
+            'must be true in production (certificate verification protects credentials and links)',
+        });
+      }
+      if (/@localhost>?$/i.test(env.MAIL_FROM)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['MAIL_FROM'],
+          message: 'must be a real sender address in production',
+        });
+      }
     }
     for (const origin of env.CORS_ALLOWED_ORIGINS) {
       if (!origin.startsWith('https://')) {
@@ -285,13 +392,61 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
     setup: {
       token: parsed.SETUP_TOKEN ?? null,
     },
-    mail: {
-      transport: parsed.MAIL_TRANSPORT ?? (parsed.NODE_ENV === 'production' ? 'disabled' : 'log'),
-      fileDir: parsed.MAIL_FILE_DIR,
-      from: parsed.MAIL_FROM,
+    mail: buildMailConfig(parsed),
+    jobs: {
+      worker: parsed.JOBS_WORKER,
+      concurrency: parsed.JOBS_CONCURRENCY,
+      pollIntervalMs: parsed.JOBS_POLL_INTERVAL_MS,
+      lockTimeoutMs: parsed.JOBS_LOCK_TIMEOUT_MS,
+      retryBaseMs: parsed.JOBS_RETRY_BASE_MS,
+      shutdownGraceMs: parsed.JOBS_SHUTDOWN_GRACE_MS,
+    },
+    media: {
+      storage: parsed.MEDIA_STORAGE,
+      localDir: parsed.MEDIA_LOCAL_DIR,
+      maxUploadBytes: parsed.MEDIA_MAX_UPLOAD_MB * 1024 * 1024,
+      publicBaseUrl: parsed.MEDIA_PUBLIC_BASE_URL ?? null,
+      s3:
+        parsed.S3_BUCKET === undefined
+          ? null
+          : {
+              bucket: parsed.S3_BUCKET,
+              region: parsed.S3_REGION,
+              endpoint: parsed.S3_ENDPOINT ?? null,
+              accessKeyId: parsed.S3_ACCESS_KEY_ID ?? null,
+              secretAccessKey: parsed.S3_SECRET_ACCESS_KEY ?? null,
+              forcePathStyle: parsed.S3_FORCE_PATH_STYLE,
+            },
+    },
+    content: {
+      trashRetentionDays: parsed.CONTENT_TRASH_RETENTION_DAYS,
+      revisionLimit: parsed.CONTENT_REVISIONS_LIMIT,
     },
   };
   return deepFreeze(config);
+}
+
+function buildMailConfig(parsed: z.output<typeof envSchema>): AppConfig['mail'] {
+  const transport =
+    parsed.MAIL_TRANSPORT ??
+    (parsed.NODE_ENV === 'production' ? (parsed.SMTP_HOST ? 'smtp' : 'disabled') : 'log');
+  return {
+    transport,
+    fileDir: parsed.MAIL_FILE_DIR,
+    from: parsed.MAIL_FROM,
+    smtp:
+      transport === 'smtp' && parsed.SMTP_HOST !== undefined
+        ? {
+            host: parsed.SMTP_HOST,
+            port: parsed.SMTP_PORT,
+            secure: parsed.SMTP_SECURE,
+            requireTls: parsed.SMTP_REQUIRE_TLS,
+            rejectUnauthorized: parsed.SMTP_TLS_REJECT_UNAUTHORIZED,
+            user: parsed.SMTP_USER ?? null,
+            password: parsed.SMTP_PASSWORD ?? null,
+          }
+        : null,
+  };
 }
 
 function safeDecode(value: string): string {

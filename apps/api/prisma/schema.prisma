@@ -46,6 +46,9 @@ model Site {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   roleAssignments RoleAssignment[]
+  terms           Term[]
+  entries         Entry[]
+  media           Media[]
 
   @@map("sites")
 }
@@ -73,6 +76,11 @@ model User {
   roleAssignments     RoleAssignment[]
   passwordResetTokens PasswordResetToken[]
   auditEvents         AuditEvent[]
+  authoredEntries     Entry[]              @relation("EntryAuthor")
+  editedEntries       Entry[]              @relation("EntryLastEditor")
+  trashedEntries      Entry[]              @relation("EntryTrashedBy")
+  entryRevisions      EntryRevision[]
+  uploadedMedia       Media[]
 
   @@index([status])
   @@map("users")
@@ -214,4 +222,259 @@ model RateLimitBucket {
 
   @@index([expiresAt])
   @@map("rate_limit_buckets")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Milestone 3: background jobs
+// ---------------------------------------------------------------------------------------------
+
+enum JobStatus {
+  pending
+  running
+  succeeded
+  dead
+
+  @@map("job_status")
+}
+
+/// Durable job queue. Rows are inserted in the same transaction as the change that needs them and
+/// claimed with FOR UPDATE SKIP LOCKED. A failed attempt returns the job to `pending` with a later run_at;
+/// after max_attempts it becomes `dead`.
+model Job {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  name             String    @db.VarChar(100)
+  payload          Json      @default("{}")
+  status           JobStatus @default(pending)
+  attempts         Int       @default(0)
+  maxAttempts      Int       @default(5) @map("max_attempts")
+  runAt            DateTime  @default(now()) @map("run_at") @db.Timestamptz(3)
+  lockedAt         DateTime? @map("locked_at") @db.Timestamptz(3)
+  lockedBy         String?   @map("locked_by") @db.VarChar(120)
+  lastError        String?   @map("last_error") @db.VarChar(2000)
+  /// At most one job per key exists; released when the job finishes unless the caller keeps it
+  /// (recurring tasks keep it so each schedule slot runs once).
+  dedupeKey        String?   @unique @map("dedupe_key") @db.VarChar(200)
+  /// false for recurring tasks: the key stays until the row is purged, so a slot can never run twice.
+  releaseDedupeKey Boolean   @default(true) @map("release_dedupe_key")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  finishedAt       DateTime? @map("finished_at") @db.Timestamptz(3)
+
+  @@index([status, runAt])
+  @@index([name, status])
+  @@index([finishedAt])
+  @@map("jobs")
+}
+
+/// Heartbeats of running workers (embedded or standalone), shown on the jobs page.
+model JobWorker {
+  id         String   @id @db.VarChar(120)
+  hostname   String   @db.VarChar(255)
+  pid        Int
+  startedAt  DateTime @map("started_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz(3)
+
+  @@index([lastSeenAt])
+  @@map("job_workers")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Milestone 3: content model and media
+// ---------------------------------------------------------------------------------------------
+
+/// Content type definition (instance-wide). Post and Page are built in; custom types carry custom fields.
+model ContentType {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  key              String   @unique @db.VarChar(32)
+  name             String   @db.VarChar(100)
+  pluralName       String   @map("plural_name") @db.VarChar(100)
+  description      String   @default("") @db.VarChar(500)
+  hierarchical     Boolean  @default(false)
+  hasBody          Boolean  @default(true) @map("has_body")
+  hasExcerpt       Boolean  @default(true) @map("has_excerpt")
+  hasFeaturedImage Boolean  @default(true) @map("has_featured_image")
+  isSystem         Boolean  @default(false) @map("is_system")
+  /// Custom field definitions; validated by the API against the shared field-definition schema.
+  fields           Json     @default("[]")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  taxonomies ContentTypeTaxonomy[]
+  entries    Entry[]
+
+  @@map("content_types")
+}
+
+model Taxonomy {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  key          String   @unique @db.VarChar(32)
+  name         String   @db.VarChar(100)
+  pluralName   String   @map("plural_name") @db.VarChar(100)
+  description  String   @default("") @db.VarChar(500)
+  hierarchical Boolean  @default(false)
+  isSystem     Boolean  @default(false) @map("is_system")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contentTypes ContentTypeTaxonomy[]
+  terms        Term[]
+
+  @@map("taxonomies")
+}
+
+model ContentTypeTaxonomy {
+  contentTypeId String @map("content_type_id") @db.Uuid
+  taxonomyId    String @map("taxonomy_id") @db.Uuid
+
+  contentType ContentType @relation(fields: [contentTypeId], references: [id], onDelete: Cascade)
+  taxonomy    Taxonomy    @relation(fields: [taxonomyId], references: [id], onDelete: Cascade)
+
+  @@id([contentTypeId, taxonomyId])
+  @@index([taxonomyId])
+  @@map("content_type_taxonomies")
+}
+
+model Term {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  siteId      String   @map("site_id") @db.Uuid
+  taxonomyId  String   @map("taxonomy_id") @db.Uuid
+  parentId    String?  @map("parent_id") @db.Uuid
+  name        String   @db.VarChar(200)
+  slug        String   @db.VarChar(200)
+  description String   @default("") @db.VarChar(1000)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  site     Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  taxonomy Taxonomy    @relation(fields: [taxonomyId], references: [id], onDelete: Cascade)
+  parent   Term?       @relation("TermHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Term[]      @relation("TermHierarchy")
+  entries  EntryTerm[]
+
+  @@unique([siteId, taxonomyId, slug])
+  @@index([taxonomyId, parentId])
+  @@map("terms")
+}
+
+enum EntryStatus {
+  draft
+  pending
+  scheduled
+  published
+
+  @@map("entry_status")
+}
+
+/// A piece of content of some content type. Trash is orthogonal to status (trashed_at), so restoring
+/// returns the entry to the status it had. `path` is the slug chain from the root ("about/team") and is
+/// unique per site and type; for non-hierarchical types it equals the slug.
+model Entry {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  siteId          String      @map("site_id") @db.Uuid
+  contentTypeId   String      @map("content_type_id") @db.Uuid
+  authorId        String      @map("author_id") @db.Uuid
+  lastEditorId    String?     @map("last_editor_id") @db.Uuid
+  parentId        String?     @map("parent_id") @db.Uuid
+  title           String      @db.VarChar(300)
+  slug            String      @db.VarChar(200)
+  path            String      @db.VarChar(2000)
+  status          EntryStatus @default(draft)
+  excerpt         String      @default("") @db.VarChar(1000)
+  /// Rich-text document (ProseMirror JSON) validated against the shared allowlist schema.
+  body            Json        @default("{\"type\":\"doc\",\"content\":[]}")
+  /// Custom field values keyed by field key.
+  fields          Json        @default("{}")
+  /// Lower-cased title, excerpt and body text for admin search.
+  searchText      String      @default("") @map("search_text")
+  featuredMediaId String?     @map("featured_media_id") @db.Uuid
+  /// Publication time: when it went live, or (status = scheduled) when it will.
+  publishedAt     DateTime?   @map("published_at") @db.Timestamptz(3)
+  trashedAt       DateTime?   @map("trashed_at") @db.Timestamptz(3)
+  trashedById     String?     @map("trashed_by_id") @db.Uuid
+  /// Optimistic concurrency token, incremented on every write.
+  version         Int         @default(1)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  site          Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  contentType   ContentType     @relation(fields: [contentTypeId], references: [id], onDelete: Restrict)
+  author        User            @relation("EntryAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  lastEditor    User?           @relation("EntryLastEditor", fields: [lastEditorId], references: [id], onDelete: SetNull)
+  trashedBy     User?           @relation("EntryTrashedBy", fields: [trashedById], references: [id], onDelete: SetNull)
+  parent        Entry?          @relation("EntryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children      Entry[]         @relation("EntryHierarchy")
+  featuredMedia Media?          @relation(fields: [featuredMediaId], references: [id], onDelete: SetNull)
+  terms         EntryTerm[]
+  revisions     EntryRevision[]
+
+  @@unique([siteId, contentTypeId, path])
+  @@index([siteId, contentTypeId, trashedAt, updatedAt])
+  @@index([authorId])
+  @@index([parentId])
+  @@index([status, publishedAt])
+  @@index([trashedAt])
+  @@index([featuredMediaId])
+  @@map("entries")
+}
+
+model EntryTerm {
+  entryId String @map("entry_id") @db.Uuid
+  termId  String @map("term_id") @db.Uuid
+
+  entry Entry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  term  Term  @relation(fields: [termId], references: [id], onDelete: Cascade)
+
+  @@id([entryId, termId])
+  @@index([termId])
+  @@map("entry_terms")
+}
+
+/// Snapshot of an entry's editable content after a save. Bounded per entry by the revision retention.
+model EntryRevision {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  entryId      String   @map("entry_id") @db.Uuid
+  authorId     String   @map("author_id") @db.Uuid
+  entryVersion Int      @map("entry_version")
+  title        String   @db.VarChar(300)
+  snapshot     Json
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  entry  Entry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([entryId, createdAt])
+  @@map("entry_revisions")
+}
+
+/// An uploaded file. `storage_key` is server-generated (date, random id, sanitised name) and never taken
+/// from user input. Image variants are generated by a background job.
+model Media {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  siteId     String   @map("site_id") @db.Uuid
+  uploaderId String   @map("uploader_id") @db.Uuid
+  storageKey String   @unique @map("storage_key") @db.VarChar(500)
+  /// Original file name (sanitised), shown in the library.
+  filename   String   @db.VarChar(255)
+  mimeType   String   @map("mime_type") @db.VarChar(100)
+  sizeBytes  Int      @map("size_bytes")
+  width      Int?
+  height     Int?
+  title      String   @db.VarChar(255)
+  altText    String   @default("") @map("alt_text") @db.VarChar(500)
+  caption    String   @default("") @db.VarChar(1000)
+  /// [{ width, height, key, mimeType, sizeBytes }] for responsive image variants.
+  variants   Json     @default("[]")
+  /// SHA-256 of the stored file.
+  checksum   Bytes
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  site              Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  uploader          User    @relation(fields: [uploaderId], references: [id], onDelete: Restrict)
+  featuredInEntries Entry[]
+
+  @@index([siteId, createdAt])
+  @@index([uploaderId])
+  @@index([mimeType])
+  @@map("media")
 }
