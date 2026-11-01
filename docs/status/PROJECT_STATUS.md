@@ -7,7 +7,7 @@ results that were actually observed.
 |---|---|---|
 | **M1** | Architecture, repo structure, dependencies, Docker dev environment, database, health, CI | **Complete** (see results and caveats below) |
 | **M2** | Authentication, sessions, users, roles and capabilities, audit log, setup wizard, security foundations | **Complete** (see results and caveats below) |
-| M3 | Pages, posts, content types, taxonomies, revisions, media library, job queue | Not started |
+| **M3** | Pages, posts, content types, taxonomies, revisions, media library, job queue | **Complete** (see results and caveats below) |
 | M4 | Theme engine, public site runtime, starter theme, templates, SEO fundamentals, Delivery API | Not started |
 | M5 | Visual editor: document schema, widget registry, canvas, drag and drop, undo/redo, responsive controls | Not started |
 | M6 | Plugin SDK, lifecycle, extension permissions, example and default plugins | Not started |
@@ -253,20 +253,131 @@ Controls implemented in M2 and residual risks R-09…R-13 are listed in
 
 ---
 
-## Next: Milestone 3 — Content, media and background jobs
+## Milestone 3 — Content, media and background jobs
+
+Plan, scope and decisions: [`docs/milestones/m3-content-media-jobs.md`](../milestones/m3-content-media-jobs.md).
+
+### Starting point
+M2 delivered identity, sessions, capability-based authorisation and the audit log. Mail was sent in-process with
+development transports only, expired security records were never purged, and the content roles could only sign in.
+
+### What was built
+- **Job queue** (`apps/api/src/modules/jobs`): PostgreSQL table, transactional enqueue with `NOTIFY`, claims with
+  `FOR UPDATE SKIP LOCKED`, exponential backoff, `dead` after the last attempt, reclaim of abandoned claims,
+  ownership-checked completion, dedupe keys, recurring tasks that run once per slot, graceful shutdown that releases
+  unfinished work, worker heartbeats. Embedded in the API (`JOBS_WORKER=embedded`) or standalone (`dist/worker.js`).
+- **Mail**: SMTP transport (TLS and certificate checks required in production); password-reset emails are produced
+  by a job that creates the token at send time, so job payloads never contain it.
+- **Maintenance**: hourly purge of expired sessions, reset tokens, rate-limit buckets, finished jobs and stale worker
+  heartbeats; scheduled publishing every minute; trash purge hourly.
+- **Content model**: content types (Post, Page, custom) with custom fields (text, long text, number, yes/no, date,
+  choice, URL, email, media); taxonomies (Category, Tag, custom) and terms; entries with draft/pending/scheduled/
+  published states, a separate trash, hierarchical paths, slugs, excerpts, featured images, a structured rich-text
+  body, optimistic concurrency, revisions with restore, bulk actions, search and filters.
+- **Content capabilities** (`content.*`, `terms.manage`, `content_types.manage`, `media.*`, `jobs.manage`) mapped
+  to the built-in roles by the migration, and one content policy for own vs. others' entries and live content.
+- **Media**: content-sniffed uploads, re-encoding without metadata, WebP variants via a job, local and S3 drivers,
+  `/uploads` serving with safe headers and byte ranges, usage counts, ownership rules.
+- **Admin**: content lists, the editor (TipTap rich text, scheduling, slug, excerpt, featured image, terms, custom
+  fields, parent page, revisions, unsaved-changes guard, conflict handling), media library and picker, term
+  management, content type and field builder, background jobs page, command palette; navigation generated from the
+  content model.
+- **Infrastructure**: Compose `worker` service and shared `media-data` volume; nginx routes `/uploads` and allows
+  large bodies on the upload endpoint only; CI runs an S3-compatible server for the S3 driver tests.
+
+### Acceptance criteria and results
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Rolled-back jobs never run; committed jobs run once even with two workers; backoff; `dead` after the last attempt; abandoned claims reclaimed; recurring tasks once per slot | ✅ `jobs.test.ts` (13 tests, stable over repeated runs) |
+| 2 | Embedded or separate worker; graceful shutdown | ✅ `jobs.test.ts` (NOTIFY wake-up, shutdown releases unfinished work); Compose stack with a separate `worker` (API ran no jobs) |
+| 3 | Reset email via a job over real SMTP; no token in payloads; no plain-text SMTP in production | ✅ `mail.test.ts` (plain, STARTTLS + auth, refusal without TLS), `env.schema.test.ts` |
+| 4 | Maintenance purges; scheduled entries published when due (audited) | ✅ `maintenance.test.ts`, `entries.test.ts`; scheduled publish by the separate worker in the Compose stack |
+| 5 | Content types, taxonomies, terms with validation and protection of built-ins | ✅ `content-model.test.ts`; E2E (content type builder, category tree) |
+| 6 | Entry lifecycle, custom fields, unique paths, no cycles, bulk actions | ✅ `entries.test.ts`; E2E (publish, review workflow, page hierarchy, trash/restore, bulk publish) |
+| 7 | 409 on concurrent edits; revisions on every content change; bounded retention; restore | ✅ `entries.test.ts`; E2E (conflict banner, revision restore) |
+| 8 | Ownership/capability matrix for every built-in role | ✅ `content-permissions.test.ts` (23 tests; a deliberately weakened rule makes 4 of them fail) |
+| 9 | Unsafe rich text rejected | ✅ shared `content.test.ts` (hostile nodes, marks, URLs, 50 000-level nesting), `entries.test.ts`, admin `content-ui.test.tsx` |
+| 10 | Upload validation, re-encoding, variants, limits, safe serving, local and S3 drivers | ✅ `media.test.ts` (6 tests × local and S3-compatible storage); Compose stack through nginx |
+| 11 | Admin UI against the real API, responsive at 375/768/1280 | ✅ 61 Vitest/RTL tests; 88 Playwright tests (setup + 29 × 3 viewports) |
+| 12 | All checks on Node 22 and 23.7; Compose with a separate worker; CI green | ✅ local (below); CI: see "Known limitations" |
+
+### Verification run (2026-11-01, local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.0)
+
+| Command | Result |
+|---|---|
+| `pnpm run lint` / `format:check` / `typecheck` / `build` | all exit 0 |
+| `pnpm --filter @nexora/admin run size` | exit 0 — initial JS 214.7 kB gzip (budget 215 kB), CSS 8.8 kB (budget 12 kB) |
+| `TEST_REDIS_URL=… TEST_S3_ENDPOINT=… pnpm run test` | exit 0 — shared 41 · ui 7 · cli 21 · admin 61 · api 226 (**356 passed**) |
+| `pnpm --filter @nexora/api run db:check-drift` | exit 0 — "No difference detected." |
+| `pnpm run test:e2e` | exit 0 — **88 passed** |
+| `pnpm audit --prod` | "No known vulnerabilities found" |
+| `pnpm audit` (including dev deps) | 1 moderate, unchanged: `minimatch` via ESLint (R-06) |
+| Node 23.7.0, fresh copy of the tracked files: install, `typecheck`, `build`, `test` (with Redis and S3) | all exit 0 — 356 tests passed |
+| `docker build` api runtime / migrator / admin | succeeded (runtime 838 MB incl. sharp/libvips; admin 84 MB) |
+| `docker compose --profile app up` (production mode, separate worker) | all services up; through nginx: setup → sign-in → JPEG upload (EXIF orientation applied: 1200 × 2000) → WebP variants 320/768 produced by the worker → variant served with `immutable` caching → original served with a byte range (206) → entry scheduled 65 s ahead was published by the worker → jobs overview: 6 succeeded, 0 dead, 1 active worker → editor and jobs pages without CSP violations; the API process ran no jobs; containers run as uid 1000 |
+
+Issues found and fixed during M3 verification:
+
+- **The storage drivers were never committed.** The project's `.gitignore` rule `storage/` (meant for local uploads)
+  also matched `apps/api/src/modules/media/storage/`. Local checks passed because the files existed on disk; a
+  fresh copy of the tracked files on Node 23.7 failed to compile, and CI runs #13 and #14 failed. The rules are now
+  anchored and the files committed (`7e00906`).
+- **A form submitted natively** (full page reload) in the content type dialog, after a lint-driven refactor dropped
+  `preventDefault` while the matching JSX change silently failed to apply. Found by E2E; fixed.
+- **"Load latest version" after a conflict reused the cached (stale) entry** instead of refetching. Found by E2E;
+  it now fetches from the server.
+- **Jobs page overflowed on phones** (an error message capped at 448 px). Found by E2E on the 375 px viewport.
+- **Initial bundle exceeded its budget** (216.9 kB) because the navigation imported every content schema; the
+  shared contracts and the content-model query were split (214.7 kB).
+- **nodemailer 10.1.2 had three moderate advisories** (address parsing); upgraded to 10.1.7 (and the test-only
+  smtp-server/mailparser to releases that use it).
+- **Command palette acted on a stale result list**: Enter could open the first item of the previous list while the
+  deferred filter caught up (seen on CI's slower mobile run). Static commands now filter on the live input.
+- **The parent-page selector loaded only 20 entries** (it reused the list's page size); it now loads up to 100.
+- **Flaky job-queue test** relying on rows inserted in the same millisecond keeping their order; made deterministic.
+- **An upload failure path could delete a stored file after its row was committed** (flagged by lint
+  `return-await`); restructured so cleanup only happens when the database write failed.
+
+### Known limitations and caveats (honest list)
+
+- **No public site yet.** Content can be created, scheduled and published, but nothing renders it for visitors
+  until M4 (themes, site runtime, Delivery API). "View" links are therefore absent.
+- **Pages use the rich-text editor**; the visual builder arrives in M5.
+- **Admin search** is case-insensitive substring matching on title, excerpt and body text (no ranking, no full-text
+  index); fine for small and medium sites.
+- **Permissions are per capability, not per content type** (e.g. "authors may publish posts but not pages" is not
+  expressible yet). Changing an entry's author is not supported.
+- **Revisions** snapshot the content; there is no visual diff, and publishing an older revision while keeping a newer
+  draft is not supported.
+- **The parent-page selector lists at most 100 entries** of the type.
+- **Uploads are buffered in memory** (R-18); GIF, PDF, audio and video are stored as uploaded (R-15); media is public
+  by URL (R-17). Image variants are WebP only; no cropping or focal point.
+- **The admin bundle is at 214.7 of 215 kB.** The next feature that touches the shell must make room (e.g. load
+  more of the layout lazily) rather than raise the budget silently.
+- **Jobs are at-least-once** (R-14). Recurring tasks depend on at least one worker running; the jobs page warns when
+  none has reported for 90 seconds.
+- **MinIO images are no longer published on Docker Hub**, so S3 tests use `adobe/s3mock`; real AWS S3 was not tested.
+- Local tests ran against PostgreSQL 16; CI and Compose use 17.
+- **GitHub CI:** CI_RESULT
+
+### Security considerations for M3
+New controls (rich-text allowlist, content policy, upload validation and safe serving, secret-free job payloads,
+SMTP TLS) and residual risks R-14…R-18 are listed in [`docs/security/threat-model.md`](../security/threat-model.md).
+
+---
+
+## Next: Milestone 4 — Themes, public site and Delivery API
 
 Planned scope (to be confirmed at milestone start):
 
-1. Durable background job queue (PostgreSQL-backed, Redis optional) with retries and a worker process;
-   move mail onto it, add an SMTP transport, and schedule cleanup of expired sessions and reset tokens.
-2. Content model: pages and posts, custom content types and fields, taxonomies (categories, tags),
-   statuses (draft, scheduled, published, trashed), slugs, revisions with restore.
-3. Content capabilities (`content.*` per type, own vs. others) and their mapping to the Editor, Author,
-   Contributor and Viewer roles; audit events for publishing and deletion.
-4. Media library through the storage abstraction (local disk + S3-compatible): upload validation (type
-   sniffing, size limits), image variants, alt text, safe serving headers.
-5. Admin: content lists with filters, bulk actions, a structured (non-visual) editor for fields and
-   revisions, media library UI; command palette and notifications.
+1. Public site runtime (server-side rendering of published content only), routing by entry path, 404 handling,
+   caching headers and invalidation on publish.
+2. Theme engine: theme manifest, templates and template parts, theme settings validated by schema, a starter theme.
+3. Delivery API (read-only, published content only; drafts never leak) and signed preview links for drafts.
+4. Menus (navigation) management, and SEO fundamentals: titles/descriptions, canonical URLs, sitemaps, robots,
+   Open Graph, redirects on slug changes.
+5. Safe rendering of the stored rich text (escaping, allowlisted output, responsive images from media variants).
 
-Risks to address early: stored XSS through rich text (sanitise on write and on render), upload validation
-and storage isolation, revision growth, and authorisation of "own" vs. "others'" content.
+Risks to address early: draft leakage through the public paths, cache poisoning, template injection, and the
+same-origin relationship between the public site and the admin (R-03).

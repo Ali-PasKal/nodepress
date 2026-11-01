@@ -138,6 +138,7 @@ function ParentSelect({
     termId: '',
     page: 1,
     sort: 'title',
+    pageSize: 100,
   });
   const options = (candidates.data?.items ?? [])
     .filter((item) => !entry || (item.id !== entry.id && !item.path.startsWith(`${entry.path}/`)))

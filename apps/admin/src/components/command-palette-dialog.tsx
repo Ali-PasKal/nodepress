@@ -80,12 +80,16 @@ export default function CommandPaletteDialog({
           icon: Plus,
         }))
       : [];
-    const needle = deferred.toLowerCase();
+    // Static commands filter on the live input, so Enter always acts on what is on screen; only the
+    // network search uses the deferred value (and only shows results for the current query).
+    const needle = query.trim().toLowerCase();
     const matches = [...create, ...pages].filter((command) =>
       command.label.toLowerCase().includes(needle),
     );
-    return [...matches, ...(needle.length >= 2 ? (search.data ?? []) : [])];
-  }, [capabilities, model.data, deferred, search.data]);
+    const results =
+      needle.length >= 2 && deferred.toLowerCase() === needle ? (search.data ?? []) : [];
+    return [...matches, ...results];
+  }, [capabilities, model.data, query, deferred, search.data]);
 
   const run = (command: Command) => {
     onOpenChange(false);

@@ -45,6 +45,8 @@ export interface EntryFilters {
   termId: string;
   page: number;
   sort: 'updated' | 'published' | 'title';
+  /** Defaults to 20 (the API allows up to 100). */
+  pageSize?: number;
 }
 
 export function useEntries(filters: EntryFilters) {
@@ -52,7 +54,7 @@ export function useEntries(filters: EntryFilters) {
     type: filters.type,
     status: filters.status,
     page: String(filters.page),
-    pageSize: '20',
+    pageSize: String(filters.pageSize ?? 20),
     sort: filters.sort,
   });
   if (filters.search) params.set('search', filters.search);

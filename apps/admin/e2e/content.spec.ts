@@ -326,7 +326,7 @@ test.describe('Operations', () => {
 
   test('the command palette navigates and finds content', async ({ page }) => {
     await signIn(page);
-    const title = `Palette target ${suffix(page)}`;
+    const title = `Palette target ${suffix(page)} ${String(Date.now())}`;
     const created = (await apiAsUser(page, 'POST', '/entries', { type: 'post', title })) as {
       id: string;
     };
@@ -334,6 +334,10 @@ test.describe('Operations', () => {
     const palette = page.getByRole('dialog', { name: 'Search and commands' });
     await expect(palette).toBeVisible();
     await palette.getByRole('combobox').fill('media');
+    await expect(palette.getByRole('option', { name: 'Media' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/admin\/media$/);
 
