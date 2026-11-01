@@ -567,7 +567,7 @@ posts, galleries) inside text.
 | 4 | Site and previews render builder pages like the canvas, responsive at 375/768/1280, CSP allows the style by hash, no violations | ✅ runtime `app.test.ts` (builder page, CSP hash matches the inline style, embed routes); E2E: columns side by side at 1280/768 and stacked at 375, 48 px / 28 px heading per device, `style-src 'self' 'sha256-…'` without `unsafe-inline`, 0 CSP violations, no horizontal overflow |
 | 5 | Dynamic widgets and shortcodes show only publicly visible content | ✅ API `builder.test.ts` (drafts excluded from posts widgets and `[recent_posts]`, gallery limited to images) |
 | 6 | HTML embeds run only in a sandboxed opaque origin and can only be saved with `content.embed_html` | ✅ API `builder.test.ts` (403 without the capability, also for changing an existing embed; code absent from page payloads); runtime `app.test.ts`; E2E: the embed's script cannot read `parent.document` or `document.cookie`, the embed URL carries the sandbox CSP |
-| 7 | All checks on Node 22 and 23.7; CI green | ✅ local (below); CI: see the note under "Known limitations" |
+| 7 | All checks on Node 22 and 23.7; CI green | ✅ local (below); CI run #21: five of six jobs green, the Node 23.7 job hit a timing flake in an M3 job-queue test (fixed, see "Known limitations"); result of the follow-up run below |
 
 ### Verification run (2026-11-01)
 
@@ -606,6 +606,12 @@ Local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.
 - **Switching back to rich text** keeps the builder document but shows the old rich-text body; builder content is not
   converted back.
 - Some OpenAPI component names are generic (`Schema2`, …) where no title is registered.
+- **GitHub CI:** run #21 (commit `689ccca`) passed lint/format/typecheck/build/bundle budget, unit + integration +
+  drift + E2E (109 Playwright tests), Node 24, dependency audit and container images (including the fixed admin
+  image). The Node 23.7 job failed in `jobs.test.ts › times out hung handlers and retries them` (M3 test code): the
+  test app uses a 10 ms retry base, so on a slow runner the retry became due inside the same `drain()` and ran a
+  second time (`attempts: 2`). Reproduced locally under CPU load (4 of 4 runs failed), fixed by draining a single
+  round, verified under the same load (4 of 4 passed). The product behaviour was correct.
 
 ### Security considerations for M5
 New controls (closed document schema with typed styles, CSS compiled from re-checked values and allowed by hash,

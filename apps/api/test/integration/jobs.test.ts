@@ -218,7 +218,9 @@ describe('background job queue', () => {
     const type = uniqueType();
     registry.register(type, () => new Promise<void>(() => undefined), { timeoutMs: 50 });
     await queue.enqueue(prisma, type, { n: 1 });
-    await worker.drain();
+    // One round only: with this app's 10 ms retry base the retry is due almost at once, and a slow machine
+    // would otherwise run it again within the same drain (attempts 2).
+    await worker.drain(1);
     expect(await jobRows(type.name)).toMatchObject([
       { status: 'pending', attempts: 1, last_error: 'JobTimeoutError: Timed out after 50 ms' },
     ]);
