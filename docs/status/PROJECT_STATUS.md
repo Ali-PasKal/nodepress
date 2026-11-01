@@ -8,7 +8,7 @@ results that were actually observed.
 | **M1** | Architecture, repo structure, dependencies, Docker dev environment, database, health, CI | **Complete** (see results and caveats below) |
 | **M2** | Authentication, sessions, users, roles and capabilities, audit log, setup wizard, security foundations | **Complete** (see results and caveats below) |
 | **M3** | Pages, posts, content types, taxonomies, revisions, media library, job queue | **Complete** (see results and caveats below) |
-| M4 | Theme engine, public site runtime, starter theme, templates, SEO fundamentals, Delivery API | Not started |
+| **M4** | Theme engine, public site runtime, starter theme, templates, SEO fundamentals, Delivery API | **Complete** (see results and caveats below) |
 | M5 | Visual editor: document schema, widget registry, canvas, drag and drop, undo/redo, responsive controls | Not started |
 | M6 | Plugin SDK, lifecycle, extension permissions, example and default plugins | Not started |
 | M7 | Additional themes, forms, WordPress import, performance | Not started |
@@ -370,17 +370,147 @@ SMTP TLS) and residual risks R-14…R-18 are listed in [`docs/security/threat-mo
 
 ---
 
-## Next: Milestone 4 — Themes, public site and Delivery API
+## Milestone 4 — Public site, themes and Delivery API
+
+Plan, scope and decisions: [`docs/milestones/m4-site-themes-delivery.md`](../milestones/m4-site-themes-delivery.md).
+
+### Starting point
+M3 delivered the content model, media and background jobs. Content could be published, but nothing rendered it for
+visitors: `/` in the container topology returned 404 and there was no read API for published content.
+
+### What was built
+- **Delivery API** (`apps/api/src/modules/delivery`, public, read-only): resolves a path to a page — home (latest
+  posts or a static page), entry, archive (content type or term), redirect or not found — together with the site
+  data a theme needs (identity, language and direction, SEO defaults, resolved theme settings and media, menus);
+  sitemap and feed data; preview pages. Every query uses one "publicly visible" predicate plus a path-based ancestor
+  check; custom fields are delivered only when marked public.
+- **URLs and redirects**: route prefixes for content types and taxonomies (posts `/blog/…`, pages at the root,
+  `/category/…`, `/tag/…`, custom types under their prefix), reserved paths (`admin`, `api`, `uploads`) and
+  collision checks (between prefixes and against root pages); automatic, flattened 301 redirects when a published
+  entry's path, a term's slug or a prefix changes; manual redirects with source/target validation and loop
+  detection.
+- **Previews**: `POST /entries/{id}/preview` issues a one-hour link (256-bit token, only the SHA-256 stored); the
+  site shows the latest saved version with a notice, `noindex`, `no-store` and no referrer.
+- **Site settings and SEO**: general settings (name, tagline, language → text direction, home page, posts per page),
+  SEO settings (title template, default description and social image, search engine visibility), per-entry SEO
+  (title, description, `noindex`). New capabilities `appearance.manage` (administrator) and `seo.manage`
+  (administrator, editor).
+- **Themes**: `packages/theme-sdk` (types, safe rich-text and responsive image components, helpers) and
+  `packages/theme-starter` (manifest with seven settings and two menu locations; React templates for home, entries,
+  pages, archives, not found and previews; light/dark; logical CSS properties for right-to-left; Persian and English
+  interface strings; no client-side JavaScript). The API validates theme settings against the manifest.
+- **Menus**: menus with nested items (entry, term, home, custom link; up to three levels) assigned to theme
+  locations; unpublished targets are left out of the delivered menu.
+- **Site runtime** (`apps/site-runtime`): Express + React server rendering from the Delivery API only (no database,
+  no credentials); the runtime writes the document head (title template, description, canonical, robots, Open
+  Graph, Twitter, JSON-LD), `robots.txt`, `sitemap.xml` and RSS; CSP `default-src 'none'` with no script source and
+  styles only from its own origin (theme variables are a re-validated stylesheet, not inline CSS); strong ETags and
+  304s; 404 pages from the theme; 503 with `Retry-After` when the API is unreachable.
+- **Admin**: dashboard (new start page), Appearance (site identity, reading, theme and generated theme settings
+  form), Menus (tree editor), SEO and Redirects pages, an SEO panel plus View/Preview buttons in the editor, address
+  prefix/visibility for content types and taxonomies, a "public" switch for custom fields, a "View site" link.
+- **Infrastructure**: `site` image and Compose service; nginx routes everything outside `/admin/`, `/api/` and
+  `/uploads/` to the site and keeps `/_preview/` out of the access log; `nexora dev` and the Vite dev/preview
+  servers serve site, admin and API from one origin; CI builds the site image; Playwright runs against the site
+  runtime.
+- **Fixes found on the way**: partial updates of content types and terms reset omitted fields to their defaults
+  (Zod `partial()` keeps defaults) — fixed with default-free update schemas and covered by tests; the built-in
+  content types were listed in an arbitrary order (same creation time) — now fixed; a Redis dump file had been
+  committed in M3 by accident — removed and ignored.
+
+### Acceptance criteria and results
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | The Delivery API returns only publicly visible content (drafts, pending, scheduled, trashed, non-public types, unpublished ancestors excluded) | ✅ `delivery.test.ts` (every case on pages, listings, sitemap and feed, plus a "published" row with a future date); mutation check: removing any clause of the visibility predicate or the ancestor check makes the test fail (4 of 4) |
+| 2 | URLs resolve for home (posts or static page), posts, nested pages, custom types, taxonomy archives, pagination; reserved paths and prefix collisions rejected | ✅ `delivery.test.ts`, `routes-redirects.test.ts` (reserved prefixes, type/taxonomy/root-page collisions, root slugs, generated slugs stepping around prefixes), shared `public-site.test.ts`; E2E |
+| 3 | 301 redirects when a published entry's path or a term's slug changes (descendants, flattened chains); manual redirects; safe targets | ✅ `routes-redirects.test.ts` (entry + published children, chain flattening and moving back, drafts excluded, term slug, taxonomy and content type prefix changes, manual redirect validation, loop detection, permissions, audit); Compose: 301 through nginx after a slug change |
+| 4 | Preview links show the latest saved draft only with a valid, unexpired link; `noindex`, `no-store` | ✅ `delivery.test.ts` (latest version, hash-only storage, expiry, malformed and unknown tokens, suspended creator, trashed entry, authors cannot preview others' drafts); runtime `app.test.ts`; E2E (preview tab from the editor); Compose (through nginx, not in the access log) |
+| 5 | The site runtime renders every page type with correct status codes (200/301/404/503), ETags and a strict CSP without violations; hostile content escaped | ✅ runtime `app.test.ts` (11 tests: home, entry, archive, static home, 404, 400 for malformed paths, redirects, 503 for an unreachable API and for a fresh install, ETag → 304, tampered asset URLs, hostile title/author/body/JSON-LD/menu URLs); E2E: no CSP violations; Compose: 304, 0 CSP violations |
+| 6 | Menus, theme settings, tagline, language/direction, home mode and posts per page affect the rendered site | ✅ `delivery.test.ts` (menus without unpublished targets, `fa` → `rtl`, home modes and fallback, pagination size), runtime `app.test.ts` (RTL and Persian labels), E2E (tagline, accent colour, footer text and menu change the page) |
+| 7 | SEO output: title template, description, canonical, Open Graph, JSON-LD, `noindex`, `sitemap.xml`, `robots.txt` (with the visibility switch), RSS — correct and escaped | ✅ runtime `app.test.ts`, `delivery.test.ts` (sitemap/feed contents), E2E (title template, canonical, OG type, robots switch, sitemap, feed) |
+| 8 | Admin: appearance, menus, SEO, redirects, editor SEO panel and View/Preview, content type route settings, dashboard — real API, accessible, responsive, within the bundle budget | ✅ 65 Vitest/RTL tests (new: theme settings form with server errors, redirect validation, nested menu save, dashboard and navigation); 100 Playwright tests on 1280/768/375 px; initial JS 213.9 kB of 215 kB (system status and dashboard are now lazy) |
+| 9 | `nexora dev` serves admin, API and site from one origin; Compose serves the site at `/` through nginx | ✅ `nexora dev --no-infra` run: site, `/admin/` and `/api/` all answered on `:5173` (`/admin` → `/admin/`); the E2E suite uses the same Vite proxy; Compose stack (below) |
+| 10 | All checks on Node 22 and 23.7; CI green | ✅ local (below); CI: see "Known limitations" |
+
+### Verification run (2026-11-01)
+
+Local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.0, Docker 29.
+
+| Command | Result |
+|---|---|
+| `pnpm run lint` / `format:check` / `typecheck` / `build` | all exit 0 (ESLint now runs with a 6 GB heap: the default heap ran out after the new packages were added) |
+| `pnpm --filter @nexora/admin run size` | exit 0 — initial JS 213.9 kB gzip (budget 215 kB), CSS 9.1 kB (budget 12 kB) |
+| `pnpm run test` (with Redis and S3) | exit 0 — shared 51 · ui 7 · cli 21 · theme-sdk 6 · theme-starter 6 · site-runtime 14 · admin 65 · api 245 (**415 passed**) |
+| `pnpm --filter @nexora/api run db:check-drift` | "No difference detected." (migration also verified as an upgrade from M3 data with custom types and taxonomies) |
+| `pnpm run test:e2e` | exit 0 — **100 passed** (setup + 33 × 3 viewports) |
+| Node 23.7.0, fresh copy of the tracked files (`git ls-files`): install, `typecheck`, `build`, `test` | all exit 0 — every suite passed |
+| `docker build` api runtime / migrator / site / admin | succeeded (api 839 MB, site 268 MB, admin 84 MB) |
+| `docker compose --profile app up` (production mode) | all services healthy; through nginx: before installation the site answers 503 → setup → JPEG upload → WebP variants by the worker → published post with featured image, page and menu → home and post 200 with `default-src 'none'` CSP (admin headers not leaking onto the site), responsive `srcset` loaded, conditional request 304, unknown path 404, slug change → 301, `robots.txt`/`sitemap.xml`/`feed.xml` 200, preview link 200 with `no-store`/`no-referrer` and absent from the nginx log, draft URL 404, 0 CSP violations; the site container has no database or secret variables and runs as uid 1000 |
+
+Issues found and fixed during M4 verification:
+
+- **Partial updates of content types and terms reset omitted fields** (an M3 bug: Zod's `partial()` keeps
+  defaults, so a PATCH with only a name reset the description, features, fields and taxonomies). Update schemas
+  now have no defaults; covered by API and contract tests.
+- **Job shutdown race** (M3 code, seen as a failing test on CI's Node 24 job): when the worker stopped, the
+  interrupted job's failure path could mark it for retry before the release ran, counting the attempt and adding
+  a backoff delay. Interrupted jobs now skip the failure path and are released without counting the attempt.
+- **A form nested in the menu editor** made the "Add link" button submit the page natively; found by E2E.
+- **Reloading the dashboard in dev/preview** (`/admin` without the slash) showed Vite's base-URL notice; Vite now
+  redirects like nginx. Found by E2E.
+- **The built-in content types were listed in arbitrary order** (identical creation times); now fixed.
+- **A Redis dump file had been committed in M3**; removed and ignored.
+- **Before installation the site said "temporarily unavailable"**; it now says that the site is not set up yet and
+  where to finish the installation.
+
+### Known limitations and caveats (honest list)
+
+- **No visual builder yet** (M5): pages use the rich-text editor. Only the starter theme exists; installing other
+  themes is an extension-trust question for M6/M7.
+- **Every page view is rendered per request** (a handful of indexed queries); there is no HTML cache, CDN
+  integration or application-level rate limiting on public endpoints yet (R-19, planned for M7).
+- **Hierarchical types have no archive page**, and listings (home, archives, feed) contain only top-level entries of
+  hierarchical types; posts are not hierarchical by default, so the blog is unaffected.
+- **Sitemap is a single file capped at 50 000 URLs** (no sitemap index yet).
+- **Feed** contains the 20 latest posts with summaries, not full content.
+- **Preview links cannot be revoked individually** (they expire after an hour, R-20); the preview shows the last
+  saved version, not unsaved edits.
+- **Root pages created before M4 whose slug equals a route prefix** (e.g. a page "blog") are shadowed by that
+  section (R-22); rename them.
+- **Menu editing** reorders items with buttons (no drag and drop yet); moving an item does not move its children
+  with it.
+- **Redirects** are exact-path matches (no wildcards or regular expressions); a prefix change creates one redirect
+  per published entry (at most 10 000 per change).
+- **The site runtime must share the origin of `/uploads`** (nginx or the Vite proxies do this) unless
+  `MEDIA_PUBLIC_BASE_URL` points at a CDN.
+- Interface strings of the starter theme exist in English and Persian only; content language and direction follow
+  the site language setting.
+- Behind nginx's gzip the site's strong ETags become weak ones; conditional requests still return 304.
+- **GitHub CI:** run #18 (commit `9ab64f4`) passed five of six jobs (lint/format/typecheck/build/bundle budget,
+  unit + integration + drift + E2E, Node 23.7, audit, container images); the Node 24 job failed on the job-shutdown
+  race described above, fixed in the following commit. The result for that commit is recorded below once known.
+
+### Security considerations for M4
+New controls (Delivery API draft isolation, hashed preview tokens, script-free CSP on public pages, escaping of
+head/JSON-LD/XML, route and redirect validation, theme settings validation) and residual risks R-19…R-22 are listed
+in [`docs/security/threat-model.md`](../security/threat-model.md). Risk R-03 (same-origin admin and site) is much
+reduced: the public pages cannot run scripts at all.
+
+---
+
+## Next: Milestone 5 — Visual editor
 
 Planned scope (to be confirmed at milestone start):
 
-1. Public site runtime (server-side rendering of published content only), routing by entry path, 404 handling,
-   caching headers and invalidation on publish.
-2. Theme engine: theme manifest, templates and template parts, theme settings validated by schema, a starter theme.
-3. Delivery API (read-only, published content only; drafts never leak) and signed preview links for drafts.
-4. Menus (navigation) management, and SEO fundamentals: titles/descriptions, canonical URLs, sitemaps, robots,
-   Open Graph, redirects on slug changes.
-5. Safe rendering of the stored rich text (escaping, allowlisted output, responsive images from media variants).
+1. Versioned page document schema (sections, containers, widgets, responsive overrides) validated in the browser and
+   the API, with migrations between schema versions.
+2. Widget registry and first-party widgets (heading, text, image, button, spacer, columns, …) with renderers used by
+   both the editor canvas and the site runtime.
+3. Editor: canvas with drag and drop, selection, properties panel, undo/redo, responsive preview (desktop, tablet,
+   mobile), keyboard accessibility; saving through the existing revisions and concurrency model.
+4. Pages can choose between the rich-text body and a builder document; previews and the public site render both.
+5. Sandboxed HTML embed (iframe without `allow-same-origin`).
 
-Risks to address early: draft leakage through the public paths, cache poisoning, template injection, and the
-same-origin relationship between the public site and the admin (R-03).
+Risks to address early: document schema evolution, XSS through widget properties, editor performance with large
+documents, accessibility of drag and drop.

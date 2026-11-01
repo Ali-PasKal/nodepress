@@ -5,7 +5,11 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import helmet from 'helmet';
 import type { Logger } from 'pino';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { DeliveryUnavailableError, type DeliveryClient } from './delivery-client.js';
+import {
+  DeliveryUnavailableError,
+  SiteNotInstalledError,
+  type DeliveryClient,
+} from './delivery-client.js';
 import { escapeHtml, renderDocument } from './html.js';
 import { buildSeo } from './seo.js';
 import type { ThemeSet } from './themes.js';
@@ -250,6 +254,19 @@ export function createSiteApp({ client, themes, logger }: SiteAppOptions): Expre
   app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
     if (res.headersSent) return;
     res.set('Cache-Control', 'no-store');
+    if (error instanceof SiteNotInstalledError) {
+      res
+        .status(503)
+        .set('Retry-After', '30')
+        .type('html')
+        .send(
+          plainPage(
+            'This site is not set up yet',
+            'Open /admin/ to finish the installation, then reload this page.',
+          ),
+        );
+      return;
+    }
     if (error instanceof DeliveryUnavailableError) {
       logger.warn({ err: error, path: req.path }, 'Delivery API unavailable');
       res

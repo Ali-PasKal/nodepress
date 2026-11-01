@@ -13,7 +13,12 @@ import type { z } from 'zod';
 
 /** The Delivery API could not be reached or answered with an error (the site shows a 503 page). */
 export class DeliveryUnavailableError extends Error {
-  override readonly name = 'DeliveryUnavailableError';
+  override readonly name: string = 'DeliveryUnavailableError';
+}
+
+/** The API is up but NEXORA has not been installed yet (the setup wizard has not been completed). */
+export class SiteNotInstalledError extends DeliveryUnavailableError {
+  override readonly name = 'SiteNotInstalledError';
 }
 
 export interface DeliveryClient {
@@ -57,6 +62,9 @@ export function createDeliveryClient(baseUrl: string, timeoutMs: number): Delive
     }
     if (!response.ok) {
       await response.body?.cancel();
+      if (response.status === 409) {
+        throw new SiteNotInstalledError('The site has not been set up yet.');
+      }
       throw new DeliveryUnavailableError(`The Delivery API answered ${String(response.status)}.`);
     }
     const parsed = schema.safeParse(await response.json().catch(() => undefined));

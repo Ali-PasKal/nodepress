@@ -193,6 +193,13 @@ describe('site runtime', () => {
     await request(app).get('/robots.txt').expect(503);
   });
 
+  it('tells visitors of a fresh installation where to finish the setup', async () => {
+    api.notInstalled = true;
+    const response = await request(app).get('/').expect(503);
+    expect(response.text).toContain('This site is not set up yet');
+    expect(response.text).toContain('Open /admin/ to finish the installation');
+  });
+
   it('honours the search engine visibility switch and per-entry noindex', async () => {
     api.routes.set('/hidden', {
       kind: 'entry',

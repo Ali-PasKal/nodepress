@@ -65,6 +65,8 @@ export class JobWorker implements OnApplicationBootstrap, BeforeApplicationShutd
   );
   private readonly logger = new Logger(JobWorker.name);
   private readonly running = new Map<string, RunningJob>();
+  /** Jobs interrupted by shutdown: `stop()` returns them to the queue, so the failure path must not. */
+  private readonly releasing = new Set<string>();
   private readonly scheduledSlots = new Map<string, number>();
   private started = false;
   private stopping = false;
@@ -135,9 +137,11 @@ export class JobWorker implements OnApplicationBootstrap, BeforeApplicationShutd
       ]);
     }
     for (const [jobId, job] of this.running) {
+      this.releasing.add(jobId);
       job.controller.abort(new Error('Worker is shutting down'));
       await this.release(jobId);
     }
+    this.releasing.clear();
     const listener = this.listener;
     this.listener = null;
     await listener?.end().catch(() => undefined);
@@ -281,6 +285,11 @@ export class JobWorker implements OnApplicationBootstrap, BeforeApplicationShutd
       await Promise.race([registered.handle(payload.data, context), aborted]);
       await this.markSucceeded(job);
     } catch (error) {
+      if (this.releasing.has(job.id)) {
+        // Interrupted by shutdown: not a failed attempt. stop() releases it without counting the attempt
+        // (marking it for retry here would race with that and add a backoff delay).
+        return;
+      }
       const message = errorMessage(error);
       if (error instanceof PermanentJobError || job.attempts >= job.maxAttempts) {
         this.logger.error(

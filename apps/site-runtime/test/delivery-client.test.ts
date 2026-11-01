@@ -2,7 +2,11 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { createDeliveryClient, DeliveryUnavailableError } from '../src/delivery-client.js';
+import {
+  createDeliveryClient,
+  DeliveryUnavailableError,
+  SiteNotInstalledError,
+} from '../src/delivery-client.js';
 import { site } from './fixtures.js';
 
 describe('delivery client', () => {
@@ -36,6 +40,9 @@ describe('delivery client', () => {
         case '/api/v1/delivery/feed':
           json(500, { error: 'boom' });
           return;
+        case '/not-installed/api/v1/delivery/site':
+          json(409, { error: { code: 'CONFLICT' } });
+          return;
         default:
           if (url.pathname.startsWith('/api/v1/delivery/preview/')) {
             json(404, { error: { code: 'NOT_FOUND' } });
@@ -68,6 +75,9 @@ describe('delivery client', () => {
     await expect(client.sitemap()).rejects.toBeInstanceOf(DeliveryUnavailableError);
     await expect(client.feed()).rejects.toThrow('The Delivery API answered 500.');
     expect(await client.preview('A'.repeat(43))).toBeNull();
+    await expect(
+      createDeliveryClient(`${baseUrl}/not-installed`, 2_000).site(),
+    ).rejects.toBeInstanceOf(SiteNotInstalledError);
   });
 
   it('reports an unreachable or slow API as unavailable', async () => {

@@ -9,7 +9,11 @@ import type {
 } from '@nexora/shared';
 import { pino } from 'pino';
 import { createSiteApp } from '../src/app.js';
-import { DeliveryUnavailableError, type DeliveryClient } from '../src/delivery-client.js';
+import {
+  DeliveryUnavailableError,
+  SiteNotInstalledError,
+  type DeliveryClient,
+} from '../src/delivery-client.js';
 import { ThemeSet } from '../src/themes.js';
 
 export const HOSTILE = '<script>alert("x")</script>';
@@ -139,6 +143,7 @@ export interface FakeApi {
   sitemap: DeliverySitemap;
   feed: DeliveryFeed;
   down: boolean;
+  notInstalled: boolean;
   calls: string[];
 }
 
@@ -153,6 +158,7 @@ export function fakeApi(): FakeApi {
       items: [],
     },
     down: false,
+    notInstalled: false,
     calls: [],
   };
 }
@@ -161,6 +167,7 @@ export function fakeClient(api: FakeApi): DeliveryClient {
   const guard = (call: string) => {
     api.calls.push(call);
     if (api.down) throw new DeliveryUnavailableError('down');
+    if (api.notInstalled) throw new SiteNotInstalledError('not installed');
   };
   return {
     page(path, page) {
