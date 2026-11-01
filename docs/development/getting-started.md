@@ -36,8 +36,21 @@ NEXORA is not installed yet. Open /admin/setup and enter this one-time setup tok
 
 (Set `SETUP_TOKEN` in `.env` to choose it yourself.) Once installed, the wizard is permanently disabled.
 
-In development, password reset emails are written to the API log (`MAIL_TRANSPORT=log`); set
-`MAIL_TRANSPORT=file` to get one JSON file per email in `MAIL_FILE_DIR` instead.
+In development, emails are written to the API log (`MAIL_TRANSPORT=log`); set `MAIL_TRANSPORT=file` to get one
+JSON file per email in `MAIL_FILE_DIR` instead, or point `SMTP_HOST`/`SMTP_PORT` at a local mail catcher with
+`MAIL_TRANSPORT=smtp` and `SMTP_REQUIRE_TLS=false` (development only).
+
+### Content, media and background jobs
+
+- **Content:** Posts and Pages are built in; define more under *System → Content types* (custom fields and
+  taxonomies). Categories and Tags are managed under *Content*.
+- **Media** is stored in `apps/api/storage/uploads` by default (ignored by git). Set `MEDIA_STORAGE=s3` and the
+  `S3_*` variables to use any S3-compatible store. Files are served at `/uploads/...`; the Vite dev server proxies
+  that path to the API.
+- **Background jobs** (emails, image variants, scheduled publishing, cleanup) run inside the API process by default
+  (`JOBS_WORKER=embedded`). To run them separately, start the API with `JOBS_WORKER=off` and run
+  `pnpm --filter @nexora/api run start:worker` (after a build). *System → Background jobs* shows the queue,
+  failures and worker heartbeats.
 
 Locked out? `pnpm nexora user reset-password --email you@example.com` sets a temporary password (printed once)
 and signs the account out everywhere.
@@ -114,6 +127,10 @@ The equivalent root `package.json` scripts (`pnpm build`, `pnpm test`, `pnpm lin
 
 - API integration tests **recreate the `public` schema** of `TEST_DATABASE_URL` and refuse to run unless the database name ends in `_test`.
 - Set `TEST_REDIS_URL` to also run the cache integration test.
+- Set `TEST_S3_ENDPOINT` to also run the media tests against S3 storage, using any S3-compatible server with a bucket
+  named `nexora-test`, for example:
+  `docker run -d -p 9090:9090 -e COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=nexora-test adobe/s3mock:4.6.0`
+  then `TEST_S3_ENDPOINT=http://127.0.0.1:9090 pnpm test`.
 - The Compose PostgreSQL service creates `nexora_test` and `nexora_e2e` on first start (`infrastructure/docker/postgres/init`). If your volume predates that script: `docker compose exec postgres createdb -U nexora nexora_test`.
 - Playwright uses Chromium: run `pnpm --filter @nexora/admin exec playwright install chromium` once.
 
@@ -123,8 +140,10 @@ The equivalent root `package.json` scripts (`pnpm build`, `pnpm test`, `pnpm lin
 POSTGRES_PASSWORD='use-a-long-random-value' docker compose --profile app up --build
 ```
 
-This builds and runs `migrate` (one-shot), `api` (`NODE_ENV=production`) and `admin` (nginx serving `/admin/` and
-proxying `/api/`) at <http://127.0.0.1:8080/admin/>. Because the API runs in production mode it **refuses
+This builds and runs `migrate` (one-shot), `api` (`NODE_ENV=production`, `JOBS_WORKER=off`), `worker` (background
+jobs) and `admin` (nginx serving `/admin/` and proxying `/api/` and `/uploads/`) at <http://127.0.0.1:8080/admin/>.
+Uploaded media lives in the `media-data` volume, shared by `api` and `worker`. Mail is disabled until you set
+`SMTP_HOST` (and usually `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`); TLS is required. Because the API runs in production mode it **refuses
 to start with the development password** from `.env.example`. If your `postgres-data` volume was initialised
 with the development password, either change it in PostgreSQL (`ALTER ROLE nexora PASSWORD '…'`) or
 recreate the volume (`docker compose down -v` deletes all local data).

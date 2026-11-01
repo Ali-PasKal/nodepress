@@ -11,6 +11,7 @@ import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useState } from 'react';
 import { Outlet } from 'react-router';
 import { Brand } from '../components/brand';
+import { CommandPalette } from '../components/command-palette';
 import { ThemeToggle } from '../components/theme-toggle';
 import { UserMenu } from '../components/user-menu';
 import { useUiStore } from '../stores/ui-store';
@@ -107,6 +108,7 @@ export function AdminLayout() {
           <div className="min-w-0 flex-1">
             <Breadcrumbs />
           </div>
+          <CommandPalette />
           <ThemeToggle />
           <UserMenu />
         </header>

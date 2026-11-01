@@ -8,6 +8,7 @@ import { NotFoundPage } from '../routes/not-found-page';
 import { RouteErrorPage } from '../routes/route-error-page';
 
 const handle = (breadcrumbs: string[]): RouteHandle => ({ breadcrumbs });
+const CONTENT_READERS = ['content.read', 'content.create', 'content.edit_others'];
 
 /*
  * Sign-in and system status ship in the initial bundle; every other page is code-split and loaded on
@@ -50,6 +51,90 @@ export const adminRoutes: RouteObject[] = [
         path: 'system/status',
         element: <SystemStatusPage />,
         handle: handle(['System', 'Status']),
+      },
+      {
+        path: 'content/:type',
+        handle: handle(['Content']),
+        lazy: async () => {
+          const { EntriesPage } = await import('../features/content/entries-page');
+          return {
+            element: (
+              <RequireCapability capability={CONTENT_READERS}>
+                <EntriesPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'content/:type/:id',
+        handle: handle(['Content', 'Editor']),
+        lazy: async () => {
+          const { EntryEditorPage } = await import('../features/content/entry-editor-page');
+          return {
+            element: (
+              <RequireCapability capability={CONTENT_READERS}>
+                <EntryEditorPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'taxonomies/:taxonomy',
+        handle: handle(['Content', 'Terms']),
+        lazy: async () => {
+          const { TermsPage } = await import('../features/content/terms-page');
+          return {
+            element: (
+              <RequireCapability capability="terms.manage">
+                <TermsPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'media',
+        handle: handle(['Content', 'Media']),
+        lazy: async () => {
+          const { MediaPage } = await import('../features/media/media-page');
+          return {
+            element: (
+              <RequireCapability capability={['media.upload', 'media.manage', 'content.read']}>
+                <MediaPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'settings/content-types',
+        handle: handle(['System', 'Content types']),
+        lazy: async () => {
+          const { ContentTypesPage } = await import('../features/content/content-types-page');
+          return {
+            element: (
+              <RequireCapability capability="content_types.manage">
+                <ContentTypesPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'system/jobs',
+        handle: handle(['System', 'Background jobs']),
+        lazy: async () => {
+          const { JobsPage } = await import('../features/jobs/jobs-page');
+          return {
+            element: (
+              <RequireCapability capability="jobs.manage">
+                <JobsPage />
+              </RequireCapability>
+            ),
+          };
+        },
       },
       {
         path: 'users',

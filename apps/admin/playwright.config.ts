@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
-import { E2E_MAIL_DIR, E2E_SETUP_TOKEN } from './e2e/constants';
+import { E2E_MAIL_DIR, E2E_MEDIA_DIR, E2E_SETUP_TOKEN } from './e2e/constants';
 
 /**
  * End-to-end tests run the production admin build (vite preview) against a real API process and a
@@ -72,6 +72,7 @@ export default defineConfig({
         SETUP_TOKEN: E2E_SETUP_TOKEN,
         MAIL_TRANSPORT: 'file',
         MAIL_FILE_DIR: E2E_MAIL_DIR,
+        MEDIA_LOCAL_DIR: E2E_MEDIA_DIR,
         // The Vite preview proxy is one trusted hop; tests vary X-Forwarded-For to model distinct clients.
         TRUST_PROXY: '1',
       },

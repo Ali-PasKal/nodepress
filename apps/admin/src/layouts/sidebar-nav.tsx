@@ -1,6 +1,7 @@
 import { cn } from '@nexora/ui';
 import { NavLink } from 'react-router';
 import { useCapabilities } from '../features/auth/session';
+import { useContentModel } from '../features/content/model-query';
 import { visibleNavigation } from './navigation';
 
 interface SidebarNavProps {
@@ -10,9 +11,10 @@ interface SidebarNavProps {
 
 export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
   const capabilities = useCapabilities();
+  const model = useContentModel();
   return (
     <nav aria-label="Main" className="flex flex-col gap-6 px-3 py-4">
-      {visibleNavigation(capabilities).map((group) => (
+      {visibleNavigation(capabilities, model.data).map((group) => (
         <div key={group.label} className="flex flex-col gap-1">
           <p
             className={cn(
@@ -27,6 +29,7 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
               <li key={to}>
                 <NavLink
                   to={to}
+                  end={to === '/settings'}
                   onClick={onNavigate}
                   title={collapsed ? label : undefined}
                   className={({ isActive }) =>

@@ -265,6 +265,22 @@ describe('entries', () => {
       .array(revisionSummarySchema)
       .parse((await author.agent.get(`/api/v1/entries/${created.id}/revisions`).expect(200)).body);
     expect(after.map((revision) => revision.entryVersion)).toEqual([6, 5, 4]);
+
+    // A save that changes nothing but the status (here: submit for review) adds no revision.
+    const submitted = entryDetailSchema.parse(
+      (
+        await patchEntry(author, restored, {
+          status: 'pending',
+          title: restored.title,
+          termIds: [],
+        })
+      ).body,
+    );
+    expect(submitted).toMatchObject({ status: 'pending', version: 7 });
+    const unchanged = z
+      .array(revisionSummarySchema)
+      .parse((await author.agent.get(`/api/v1/entries/${created.id}/revisions`).expect(200)).body);
+    expect(unchanged.map((revision) => revision.entryVersion)).toEqual([6, 5, 4]);
   });
 
   it('enforces publication rules and publishes scheduled entries when due', async () => {

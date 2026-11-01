@@ -3,11 +3,12 @@
 An extensible, self-hostable content management system and visual website builder, built with
 TypeScript, NestJS, PostgreSQL and React.
 
-> **Status: Milestone 2 of 8 (identity and access).** The foundation (tooling, database pipeline, health
-> monitoring, Docker, CI) plus the setup wizard, sign-in, sessions, users, roles and capabilities, password
-> reset and the audit log are in place. Content management, media, themes, the visual editor and plugins
-> are **not implemented yet**. See [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for
-> exactly what works and what does not.
+> **Status: Milestone 3 of 8 (content, media and background jobs).** The foundation, identity and access
+> control, the content model (posts, pages, custom content types with custom fields, categories, tags and custom
+> taxonomies, revisions, scheduling, trash), the media library and a durable job queue with SMTP mail are in place.
+> The public site, themes, the visual editor and plugins are **not implemented yet**: content is managed and stored,
+> not yet published to visitors. See [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for exactly
+> what works and what does not.
 
 ## What exists today
 
@@ -15,19 +16,26 @@ TypeScript, NestJS, PostgreSQL and React.
   rules, liveness/readiness probes, uniform error envelope, strict security headers, CORS allowlist, request
   limits and timeouts, structured JSON logs with request correlation, and an OpenAPI document generated from
   shared Zod contracts.
-- **Identity and access** (M2): a one-time setup wizard protected by a setup token; email + password
-  sign-in (Argon2id) with server-side, HttpOnly cookie sessions (idle and absolute expiry, rotation,
-  revocation); CSRF protection (origin checks + session-bound token); rate limiting (Redis or PostgreSQL);
-  capability-based authorisation that denies by default; six built-in roles plus custom roles, with
-  privilege-escalation rules; password reset; operator recovery from the CLI; and an append-only audit log.
-- **Admin** (`apps/admin`, React 19 + Vite 8 + Tailwind 4): setup wizard, sign-in and password reset, users,
-  roles, audit log, profile and own sessions, site settings and system status, in a responsive dashboard
-  shell (collapsible sidebar, accessible mobile drawer, dark/light/system themes) served under `/admin/`
-  behind a strict Content Security Policy.
+- **Identity and access** (M2): setup wizard with a one-time token; Argon2id sign-in with server-side,
+  HttpOnly cookie sessions; CSRF protection; rate limiting; deny-by-default capability authorisation; built-in and
+  custom roles with privilege-escalation rules; password reset; CLI account recovery; append-only audit log.
+- **Content** (M3): built-in Post and Page types plus custom content types with validated custom fields;
+  categories, tags and custom taxonomies; a structured rich-text editor (no stored HTML); draft, review, scheduled
+  and published states; hierarchical pages; revisions with restore; trash; bulk actions; conflict detection when two
+  people edit the same entry; one ownership policy for every role.
+- **Media** (M3): uploads identified by their content (not their name), images re-encoded without metadata,
+  responsive variants, alt text and captions, local or S3-compatible storage, safe file serving.
+- **Background jobs** (M3): a PostgreSQL job queue with retries, recurring tasks (scheduled publishing,
+  maintenance), a separate worker process option, SMTP mail with TLS, and an operator view.
+- **Admin** (`apps/admin`, React 19 + Vite 8 + Tailwind 4): setup, sign-in, users, roles, audit log, profile,
+  content lists and editor, media library, terms, content type builder, background jobs, command palette (Ctrl+K),
+  in a responsive dashboard shell served under `/admin/` behind a strict Content Security Policy.
 - **Design system** (`packages/ui`), **shared contracts** (`packages/shared`), and the **`nexora` CLI** (`packages/cli`).
-- **Docker Compose** dev services (PostgreSQL 17, Valkey 8) and a production-like container profile.
-- **CI**: lint, format, typecheck, build, bundle-size budget, unit/integration/E2E tests, migration drift
-  check, dependency audit, Node 23.7/24 compatibility, image builds.
+- **Docker Compose** dev services (PostgreSQL 17, Valkey 8) and a production-like profile (migrate, API, worker,
+  admin/nginx).
+- **CI**: lint, format, typecheck, build, bundle-size budget, unit/integration (with PostgreSQL, Valkey and an
+  S3-compatible server), E2E on three viewports, migration drift check, dependency audit, Node 23.7/24
+  compatibility, image builds.
 
 ## Quick start
 

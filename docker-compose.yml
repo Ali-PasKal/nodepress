@@ -6,6 +6,21 @@
 # Ports are bound to 127.0.0.1 only, so the services are not exposed to the local network.
 name: nexora
 
+# Settings shared by the API and the worker (YAML anchor).
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER:-nexora}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nexora}
+  REDIS_URL: redis://valkey:6379
+  LOG_LEVEL: info
+  MEDIA_LOCAL_DIR: /data/uploads
+  MEDIA_MAX_UPLOAD_MB: ${MEDIA_MAX_UPLOAD_MB:-25}
+  # Mail stays disabled until SMTP_HOST is set (TLS is required in production).
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  MAIL_FROM: ${MAIL_FROM:-}
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -78,19 +93,49 @@ services:
     image: nexora/api:local
     restart: unless-stopped
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-nexora}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-nexora}
-      REDIS_URL: redis://valkey:6379
+      <<: *app-env
       # The admin container's nginx is the single trusted proxy hop in this topology.
       TRUST_PROXY: '1'
       TRUST_REQUEST_ID_HEADER: 'true'
       SHUTDOWN_DELAY_MS: '2000'
-      LOG_LEVEL: info
+      # Background jobs run in the separate "worker" service.
+      JOBS_WORKER: 'off'
     depends_on:
       migrate:
         condition: service_completed_successfully
       valkey:
         condition: service_healthy
+    volumes:
+      - media-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+
+  # Background worker: same image, no HTTP server. Runs emails, image variants, scheduled publishing
+  # and maintenance. Scale it independently of the API.
+  worker:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+      target: runtime
+    image: nexora/api:local
+    restart: unless-stopped
+    command: ['node', '--enable-source-maps', 'dist/worker.js']
+    environment:
+      <<: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+    # The image's health check probes the API's HTTP port, which the worker does not serve.
+    healthcheck:
+      disable: true
+    volumes:
+      - media-data:/data
     read_only: true
     tmpfs:
       - /tmp
@@ -117,3 +162,4 @@ services:
 
 volumes:
   postgres-data:
+  media-data:

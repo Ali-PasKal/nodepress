@@ -3,7 +3,7 @@ import { usePageTitle } from './use-page-title';
 
 interface PageHeaderProps {
   title: string;
-  description?: string;
+  description?: string | undefined;
   actions?: ReactNode;
 }
 

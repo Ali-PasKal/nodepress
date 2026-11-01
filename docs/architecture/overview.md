@@ -42,10 +42,10 @@
 
 | Process | Responsibility | Status |
 |---|---|---|
-| `apps/api` | Authenticated management API, public Delivery API, OpenAPI, migrations | **M1** (foundation, health, system status) |
-| `apps/admin` | Admin dashboard and (from M5) the visual editor, served as static assets under `/admin/` | **M1** (shell + system status screen) |
+| `apps/api` | Authenticated management API, public Delivery API, OpenAPI, migrations, `/uploads` file serving | **M1–M3** (identity M2; content, media, jobs M3) |
+| `apps/admin` | Admin dashboard and (from M5) the visual editor, served as static assets under `/admin/` | **M1–M3** (content, media, terms, content types, jobs in M3) |
 | `apps/site-runtime` | Server-side rendering of published pages using themes + document model | M4 |
-| worker (entrypoint in `apps/api`) | Background jobs and scheduled tasks from a PostgreSQL-backed queue | M3/M6 |
+| worker (`apps/api/dist/worker.js`) | Background jobs and recurring tasks from the PostgreSQL queue; embedded in the API by default (`JOBS_WORKER`) | **M3** |
 
 **Single origin by default.** Admin (`/admin/`), API (`/api/`) and the public site (`/`) share one origin in the
 default topology so session cookies can be `SameSite=Strict` and CORS is not needed. A **hardened topology**
@@ -118,10 +118,10 @@ Rules:
 | `users`, `roles` | users, roles, capabilities, role assignments, escalation rules | **M2** |
 | `audit` | append-only audit events | **M2** |
 | `setup`, `settings`, `sites` | installation wizard (one-shot), site settings, default site | **M2** |
-| `content` | content types, entries (pages/posts/custom), revisions, scheduling, previews | M3 |
-| `taxonomy` | taxonomies, terms, assignments | M3 |
-| `media` | uploads, variants, usage references, storage adapters | M3 |
-| `navigation` | menus and items | M3 |
+| `content` | content types and custom fields, taxonomies and terms, entries (posts/pages/custom), status workflow, scheduling, trash, revisions, content policy | **M3** |
+| `media` | uploads (content sniffing, re-encoding), variants job, usage counts, storage drivers (local, S3), `/uploads` serving | **M3** |
+| `jobs`, `maintenance`, `mail` | PostgreSQL queue, worker, recurring tasks, cleanup, SMTP | **M3** |
+| `navigation` | menus and items | M4 |
 | `themes` | theme registry, settings, templates, template parts | M4 |
 | `delivery` | public read-only API consumed by site-runtime; enforces "published only" | M4 |
 | `seo` | metadata, sitemaps, robots, redirects, structured data | M4/M6 |
@@ -129,9 +129,8 @@ Rules:
 | `extensions` | plugin registry, lifecycle, capability grants, hook bus | M6 |
 | `forms` | form definitions, submissions, retention, export | M7 |
 | `import` | WXR parsing, previews, import jobs | M7 |
-| `jobs` | PostgreSQL-backed queue, scheduler, worker entrypoint | M3 |
 
-### 4.3 Cross-cutting request pipeline (M1)
+### 4.3 Cross-cutting request pipeline (M1–M3)
 
 ```
 Node HTTP server (headers/request timeouts; trust-proxy resolution for req.ip)
@@ -140,11 +139,13 @@ Node HTTP server (headers/request timeouts; trust-proxy resolution for req.ip)
  → Cache-Control: no-store
  → CORS (only for allowlisted origins; none configured ⇒ same-origin only)
  → JSON body parser with size limit (413 on excess)
+ → /uploads/* file handler (public media; strict key validation, ranges, immutable caching) — M3
  → Nest router (URI versioning: /api/v1/…)
    → pino-http access log (request id, method, path without query, status; credentials redacted)
    → access guard: origin check (unsafe methods) → session → policy → CSRF token → capabilities
+   → timeout interceptor (503 REQUEST_TIMEOUT after REQUEST_TIMEOUT_MS; uploads: MEDIA_UPLOAD_TIMEOUT_MS)
+   → multipart parsing for the upload route only (multer, in memory, one size-limited file)
    → Zod validation pipe
-   → timeout interceptor (503 REQUEST_TIMEOUT after REQUEST_TIMEOUT_MS)
    → controller → application service
    → global exception filter (uniform error envelope; never stack traces or internals; DB unavailable ⇒ 503)
 ```
@@ -185,8 +186,10 @@ Node HTTP server (headers/request timeouts; trust-proxy resolution for req.ip)
   express (e.g. `CHECK`) are added in migration SQL and covered by tests.
 - Migrations can run with a separate, more privileged connection (`MIGRATION_DATABASE_URL`) so the runtime
   role can be restricted to DML only.
-- **Object storage** behind a `StorageAdapter` interface: S3-compatible in production, local filesystem for
-  development only. Storage keys are generated server-side, never derived from user filenames.
+- **Object storage** behind a `StorageDriver` interface with local-disk and S3-compatible drivers (M3). Storage
+  keys are generated server-side (`YYYY/MM/<random>/<ascii-name>.<ext>`) and validated again when serving; only
+  the display name comes from the uploaded file name. Local storage needs a persistent volume shared by the API
+  and the worker.
 - **Redis-compatible store** (Valkey in the dev stack, for licensing reasons) is optional: cache, distributed
   rate-limit counters. The system must remain correct without it.
 
@@ -197,8 +200,14 @@ Node HTTP server (headers/request timeouts; trust-proxy resolution for req.ip)
 - `jsonb` only for genuinely document-shaped data: versioned editor documents, validated plugin/theme
   settings, custom-field values validated against a registered schema. Every JSON column has a schema
   version and is validated on write.
-- Revisions are immutable rows referencing the entry; publishing points the entry at a revision.
-- Soft delete (`deleted_at`) for user-facing content; hard delete for ephemeral data (sessions, tokens).
+- Revisions are immutable snapshot rows referencing the entry, written on every save that changes content and
+  bounded per entry (`CONTENT_REVISIONS_LIMIT`). The entry row holds the current content; restoring a revision is a
+  new save. (Publishing a specific revision while editing a newer draft is a possible later refinement.)
+- Trash for entries is a separate `trashed_at` flag (status is preserved), purged after a retention period;
+  ephemeral data (sessions, tokens, finished jobs) is hard-deleted by the maintenance job.
+- Hierarchical entries store a materialised `path` (`about/team`), unique per site and content type, updated for
+  all descendants when an ancestor moves or is renamed.
+- Rich text is stored as validated ProseMirror JSON, never as HTML.
 - UUIDv7 primary keys (time-ordered, not enumerable) exposed in the API; no sequential IDs in URLs.
 
 ### 6.3 Multi-site readiness
@@ -252,6 +261,11 @@ migrations and registration inside a transaction and records a lifecycle state m
 - `GET /api/v1/health/live` (process up) and `GET /api/v1/health/ready` (database reachable, no pending or failed
   migrations, optional Redis). Readiness reports 503 while shutting down so load balancers drain first.
 - Containers run as non-root, with health checks; migrations run as a separate one-shot step before the API.
+- Background jobs (M3): a PostgreSQL table claimed with `FOR UPDATE SKIP LOCKED`; jobs are enqueued inside the
+  transaction of the change that needs them and workers are woken by `LISTEN/NOTIFY` (polling as fallback).
+  Execution is at-least-once with exponential backoff; jobs end in `dead` after their last attempt and can be
+  retried from the admin. Recurring tasks (scheduled publishing every minute, maintenance and trash purge hourly)
+  are deduplicated per time slot across workers. Workers record heartbeats, shown on the jobs page.
 - Backups (M6/M8): logical PostgreSQL dumps + object-storage snapshot, with automated restore verification
   before backups are reported as working.
 

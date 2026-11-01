@@ -109,15 +109,17 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 /** Shows an access-denied message for pages the user's capabilities do not cover. */
+/** Renders children only for users holding the capability (or, given a list, any one of them). */
 export function RequireCapability({
   capability,
   children,
 }: {
-  capability: string;
+  capability: string | readonly string[];
   children: ReactNode;
 }) {
   const capabilities = useCapabilities();
-  if (!capabilities.has(capability)) {
+  const required = typeof capability === 'string' ? [capability] : capability;
+  if (!required.some((key) => capabilities.has(key))) {
     return (
       <Alert tone="warning">
         <ShieldAlert aria-hidden="true" />

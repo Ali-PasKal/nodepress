@@ -48,6 +48,8 @@ ENV NODE_ENV=production
 WORKDIR /app
 # Application files stay root-owned and read-only for the unprivileged runtime user.
 COPY --from=build /out ./
+# Writable location for local media storage (MEDIA_LOCAL_DIR=/data/uploads); mount a volume here.
+RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \

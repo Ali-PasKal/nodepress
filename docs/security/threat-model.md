@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | Living document. Revised at the start of every milestone. |
-| Last reviewed | Milestone 2 (identity, access control, audit) |
+| Last reviewed | Milestone 3 (content, media, background jobs) |
 | Scope | All components in [the architecture overview](../architecture/overview.md) |
 
 NEXORA does **not** claim to be invulnerable or "more secure than WordPress". It aims for a documented
@@ -56,8 +56,9 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 - **Goals (malicious or compromised account):** stored XSS through rich text or HTML embeds to hijack an administrator's session; privilege escalation; editing or deleting other users' content.
 - **Mitigations:**
   - Implemented (M2): capability-based authorisation on every route via a global, fail-closed guard (a route without a declared policy is refused, and a test inventories every route); privilege-escalation rules (no granting unheld capabilities, no managing more privileged users, no self role/status changes, no editing one's own role, last active Super Administrator protected); role and status changes revoke the target's sessions; append-only audit log.
-  - Planned (M3): content ownership checks.
-  - Planned (M3/M5): allowlist-based HTML sanitisation on write **and** at render; a structured document model with no stored JavaScript; HTML Embed rendered in a sandboxed `iframe` without `allow-same-origin`; strict CSP on public pages.
+  - Implemented (M3): one content policy for own vs. others' entries, live content and publishing rights, tested for every built-in role (including a mutation check that the tests catch a weakened rule); entries a user may not see return 404.
+  - Implemented (M3): rich text is stored as ProseMirror JSON validated against an allowlist (no HTML, no unknown nodes or marks, link targets limited to http(s)/mailto/tel/same-site, images limited to `/uploads/` or http(s)); nesting depth is checked before parsing; the admin renders stored content as React elements, re-checking URLs.
+  - Planned (M4/M5): renderers for the public site that escape text and emit only the allowlisted constructs; HTML Embed in a sandboxed `iframe` without `allow-same-origin`; strict CSP on public pages.
   - Implemented (M1): admin CSP has `script-src 'self'` with no inline scripts (enforced by an E2E test that fails on any CSP violation).
 
 ### 3.3 Administrators
@@ -77,7 +78,8 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 - Residual: a malicious release of a pinned dependency that is not yet known to advisory databases.
 
 ### 3.6 Malicious uploaded files (M3)
-- Planned: content sniffing via file signatures (never trusting extension or client MIME type); type allowlist; size limits; server-generated storage keys (no user-controlled paths); image re-encoding through a dedicated library with safe defaults; uploads served with `Content-Disposition`, `X-Content-Type-Options: nosniff`, and from a separate origin or with restrictive CSP so uploaded HTML/SVG can never execute as same-origin script.
+- Implemented (M3): type detection by file signature (extension and client MIME type ignored) against an allowlist (JPEG, PNG, GIF, WebP, AVIF, PDF, MP4, WebM, MP3, OGG, WAV; SVG and HTML rejected); size, part and per-user rate limits; a pixel limit against decompression bombs; raster images re-encoded by libvips (sharp), which drops metadata (EXIF/GPS) and anything appended to the file; server-generated storage keys validated again when serving (traversal impossible); files served with the content type derived from the server-chosen extension, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, and `Content-Disposition: attachment` for documents.
+- Residual: uploads share the admin's origin by default (R-16); GIF, PDF, audio and video are stored as uploaded (R-15).
 
 ### 3.7 Database compromise
 - Implemented (M1): the readiness endpoint never exposes connection details; config validation refuses known development passwords in production; support for a separate migration role so the runtime role can be DML-only.
@@ -120,7 +122,15 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 | One-time setup token; setup serialised by an advisory lock; locked after install | Implemented (M2) | `setup.service.ts`; `setup.test.ts` |
 | Append-only audit log (DB trigger), written in the same transaction as the audited change; no secrets in metadata | Implemented (M2) | migration `…_identity_access_audit`; `audit.test.ts` |
 | Request validation with shared Zod contracts (422 with per-field issues) | Implemented (M2) | `zod-validation.pipe.ts` |
-| HTML sanitisation, upload validation, SSRF guard | Planned (M3) | — |
+| Rich-text allowlist schema (no stored HTML; safe link/image URLs; bounded nesting) | Implemented (M3) | `packages/shared/src/contracts/rich-text.ts`; `content.test.ts` (hostile inputs), `entries.test.ts`, admin `content-ui.test.tsx` |
+| Content ownership policy (own/others/live/publish) | Implemented (M3) | `content-policy.ts`; `content-permissions.test.ts` (every built-in role) |
+| Optimistic concurrency for entries (409 on stale versions) | Implemented (M3) | `entries.service.ts`; `entries.test.ts`, E2E |
+| Upload validation (signature sniffing, allowlist, size/pixel limits, re-encoding without metadata, server keys) | Implemented (M3) | `media.service.ts`, `image-processor.ts`, `media-types.ts`; `media.test.ts` |
+| Safe file serving (`/uploads`: key validation, nosniff, sandboxing CSP, attachment for documents, ranges) | Implemented (M3) | `uploads.handler.ts`; `media.test.ts` (local and S3) |
+| Durable jobs; secrets never in job payloads (reset token created by the job) | Implemented (M3) | `jobs/*`, `password-reset.service.ts`; `jobs.test.ts`, `mail.test.ts` |
+| SMTP with TLS and certificate verification required in production | Implemented (M3) | `env.schema.ts`, `mailer.service.ts`; `env.schema.test.ts`, `mail.test.ts` |
+| Expiry-based purging of sessions, tokens, rate-limit buckets, jobs, trash | Implemented (M3) | `maintenance.service.ts`, `entries.service.ts`; `maintenance.test.ts`, `entries.test.ts` |
+| SSRF guard (outbound fetches) | Planned (with the first feature that fetches URLs: M6/M7) | — |
 | Delivery API draft isolation, signed previews | Planned (M4) | — |
 | Plugin isolation | Planned (M6) | — |
 
@@ -161,9 +171,14 @@ administrator approval). The UI and documentation must never present trusted plu
 | R-08 | ~~No authentication~~ | Resolved in M2 |
 | R-09 | The generated setup token is written to the API log (the operator's channel for receiving it) | Accepted: single use, regenerated on every start, useless after installation; set `SETUP_TOKEN` to avoid logging |
 | R-10 | Per-account sign-in lockout can be triggered by anyone who knows an email address (denial of service against that account) | Accepted trade-off against password guessing; the window is 15 minutes and the per-IP limit still applies |
-| R-11 | Password reset email is sent in-process after the response; a crash before delivery loses it, and production has no SMTP transport yet | Open until M3 (SMTP + durable job queue); operators can use `nexora user reset-password`, administrators can set passwords |
+| R-11 | ~~Password reset email sent in-process; no SMTP transport~~ | Resolved in M3 (SMTP transport; email produced by a durable, retried job) |
 | R-12 | The audit trigger stops the application role, not a database superuser or someone with `ALTER TABLE` rights | Accepted; external log shipping planned for M8 |
 | R-13 | The capability registry is cached in memory for 30 s per API process (role grants themselves are read per request) | Accepted; only affects capabilities added by future plugin installs |
+| R-14 | Jobs run at least once: after a crash or lock timeout a job may run twice (e.g. a second reset email with a new link) | Accepted; handlers are written to be idempotent, and an older reset link stops working when a new one is issued |
+| R-15 | GIF, PDF, audio and video uploads are stored as uploaded (only raster images are re-encoded); a PDF could contain scripts for PDF viewers | Mitigated: served as `attachment` with `nosniff` and a sandboxing CSP; accepted for M3 |
+| R-16 | Media is served from the admin's origin by default (`/uploads`) | Mitigated by type allowlist, re-encoding, `nosniff` and `default-src 'none'; sandbox`; a separate media origin via `MEDIA_PUBLIC_BASE_URL` is supported |
+| R-17 | Media files are public by URL (unguessable keys, but no access control), including files only referenced by drafts | Accepted (common CMS behaviour); private media is a possible later feature |
+| R-18 | Uploads are buffered in memory (up to `MEDIA_MAX_UPLOAD_MB` each) | Mitigated by one file per request, a per-user rate limit (60 per 10 min) and the size limit; streaming uploads are a later improvement |
 
 ## 7. Security checklist (per change)
 

@@ -105,6 +105,17 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
+/** JSON with sorted object keys, for comparing content regardless of key order (jsonb reorders keys). */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item !== null && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)),
+        )
+      : item,
+  );
+}
+
 function searchTextOf(title: string, excerpt: string, body: RichTextDocument): string {
   return `${title}\n${excerpt}\n${richTextToPlainText(body)}`.toLowerCase().slice(0, 100_000);
 }
@@ -397,7 +408,12 @@ export class EntriesService implements OnModuleInit {
             data: content.termIds.map((termId) => ({ entryId: id, termId })),
           });
         }
-        if (changesContent) {
+        // Saves that change nothing (e.g. a status change only) do not create a revision.
+        if (
+          changesContent &&
+          stableJson({ ...content, termIds: [...content.termIds].sort() }) !==
+            stableJson({ ...previous, termIds: [...previous.termIds].sort() })
+        ) {
           await this.recordRevision(tx, id, auth.userId, input.version + 1, content);
         }
         if (nextStatus !== current.status) {
