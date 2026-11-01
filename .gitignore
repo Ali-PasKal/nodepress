@@ -154,8 +154,11 @@ dist/
 .env.*
 !.env.example
 apps/api/src/generated/
-uploads/
-storage/
+# Local media storage (MEDIA_LOCAL_DIR default) and stray upload folders. Anchored so that source directories
+# with these names (e.g. apps/api/src/modules/media/storage) are not ignored.
+/uploads/
+/storage/
+apps/api/storage/
 playwright-report/
 test-results/
 blob-report/
