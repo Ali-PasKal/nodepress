@@ -489,7 +489,9 @@ Issues found and fixed during M4 verification:
 - Behind nginx's gzip the site's strong ETags become weak ones; conditional requests still return 304.
 - **GitHub CI:** run #18 (commit `9ab64f4`) passed five of six jobs (lint/format/typecheck/build/bundle budget,
   unit + integration + drift + E2E, Node 23.7, audit, container images); the Node 24 job failed on the job-shutdown
-  race described above, fixed in the following commit. The result for that commit is recorded below once known.
+  race described above, fixed in the following commit. Run #19 (commit `e63948b`) passed all six jobs:
+  lint/format/typecheck/build/bundle budget, unit + integration (with PostgreSQL, Valkey and s3mock) + drift + E2E,
+  Node 23.7.0 and 24 compatibility, dependency audit, container images (including the new site image).
 
 ### Security considerations for M4
 New controls (Delivery API draft isolation, hashed preview tokens, script-free CSP on public pages, escaping of
