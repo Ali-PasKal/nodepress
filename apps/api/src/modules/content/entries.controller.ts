@@ -19,6 +19,7 @@ import {
   entryDetailSchema,
   entryListQuerySchema,
   entryListResponseSchema,
+  previewLinkSchema,
   restoreRevisionSchema,
   revisionDetailSchema,
   revisionSummarySchema,
@@ -27,6 +28,7 @@ import {
   type EntryBulkResponse,
   type EntryDetail,
   type EntryListResponse,
+  type PreviewLink,
   type RevisionDetail,
   type RevisionSummary,
 } from '@nexora/shared';
@@ -107,6 +109,17 @@ export class EntriesController {
     @Req() req: Request,
   ): Promise<EntryDetail> {
     return this.entries.update(auth, id, body, requestMeta(req));
+  }
+
+  @Post(':id/preview')
+  @HttpCode(HttpStatus.OK)
+  @RequireAnyCapability('content.read', 'content.create', 'content.edit_others')
+  @ApiOperation({
+    summary: 'Create a one-hour link that shows the latest saved content on the public site',
+  })
+  @ApiOkResponse({ standardSchema: previewLinkSchema })
+  preview(@CurrentAuth() auth: AuthContext, @Param('id', idPipe) id: string): Promise<PreviewLink> {
+    return this.entries.createPreview(auth, id);
   }
 
   @Post(':id/trash')

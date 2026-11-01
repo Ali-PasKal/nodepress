@@ -66,8 +66,11 @@ export async function resetIdentityData(): Promise<void> {
     await db.query('DELETE FROM content_types WHERE NOT is_system');
     await db.query('DELETE FROM taxonomies WHERE NOT is_system');
     await db.query(`UPDATE content_types SET fields = '[]', has_body = true, has_excerpt = true,
-      has_featured_image = true, hierarchical = (key = 'page')`);
-    await db.query(`UPDATE taxonomies SET hierarchical = (key = 'category')`);
+      has_featured_image = true, hierarchical = (key = 'page'), is_public = true,
+      route_prefix = CASE key WHEN 'post' THEN 'blog' ELSE '' END`);
+    await db.query(
+      `UPDATE taxonomies SET hierarchical = (key = 'category'), is_public = true, route_prefix = key`,
+    );
     await db.query('DELETE FROM content_type_taxonomies');
     await db.query(`INSERT INTO content_type_taxonomies (content_type_id, taxonomy_id)
       SELECT ct.id, t.id FROM content_types ct CROSS JOIN taxonomies t

@@ -173,5 +173,7 @@ jobs:
         run: docker build -f infrastructure/docker/api.Dockerfile --target migrator -t nexora/api-migrator:ci .
       - name: Build admin image
         run: docker build -f infrastructure/docker/admin.Dockerfile -t nexora/admin:ci .
+      - name: Build site image
+        run: docker build -f infrastructure/docker/site.Dockerfile -t nexora/site:ci .
       - name: Validate compose file
         run: POSTGRES_PASSWORD=ci docker compose --profile app config --quiet

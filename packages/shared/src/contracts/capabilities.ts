@@ -47,6 +47,11 @@ export const CORE_CAPABILITIES = {
     description: 'Edit and delete media uploaded by other users',
   },
   'jobs.manage': { category: 'system', description: 'View and retry background jobs' },
+  'appearance.manage': {
+    category: 'appearance',
+    description: 'Choose and configure the theme, site identity, reading settings and menus',
+  },
+  'seo.manage': { category: 'appearance', description: 'Manage SEO settings and redirects' },
 } as const satisfies Record<string, { category: string; description: string }>;
 
 export type CoreCapability = keyof typeof CORE_CAPABILITIES;
@@ -82,6 +87,7 @@ export const SYSTEM_ROLE_DEFAULTS: Readonly<
     'terms.manage',
     'media.upload',
     'media.manage',
+    'seo.manage',
   ],
   author: [
     'dashboard.access',

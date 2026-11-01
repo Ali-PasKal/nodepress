@@ -1,7 +1,7 @@
 # NEXORA CMS — local development services.
 #
 #   docker compose up -d                       PostgreSQL + Valkey for local development
-#   docker compose --profile app up --build    Production-like full stack (migrate, api, admin)
+#   docker compose --profile app up --build    Production-like full stack (migrate, api, worker, site, admin)
 #
 # Ports are bound to 127.0.0.1 only, so the services are not exposed to the local network.
 name: nexora
@@ -142,6 +142,29 @@ services:
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
 
+  # Public site: server-renders published content through the API's public Delivery endpoints. No
+  # database access and no secrets.
+  site:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: infrastructure/docker/site.Dockerfile
+    image: nexora/site:local
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DELIVERY_API_URL: http://api:3000
+      LOG_LEVEL: info
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+
+  # Edge: nginx serving the admin and routing /api and /uploads to the API and everything else to the site.
   admin:
     profiles: ['app']
     build:
@@ -153,6 +176,8 @@ services:
       - '127.0.0.1:${APP_PORT:-8080}:8080'
     depends_on:
       api:
+        condition: service_healthy
+      site:
         condition: service_healthy
     read_only: true
     tmpfs:

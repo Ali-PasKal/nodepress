@@ -37,15 +37,23 @@ model SystemState {
 /// A website managed by this instance. Exactly one ("default") exists until multi-site support lands;
 /// site-scoped data references it so tenancy can be added without a schema rewrite.
 model Site {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  key       String   @unique @db.VarChar(64)
-  name      String   @db.VarChar(200)
+  id            String   @id @default(uuid(7)) @db.Uuid
+  key           String   @unique @db.VarChar(64)
+  name          String   @db.VarChar(200)
   /// Public base URL (scheme + host [+ path]); used to build absolute links such as password resets.
-  baseUrl   String   @map("base_url") @db.VarChar(2048)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  baseUrl       String   @map("base_url") @db.VarChar(2048)
+  /// General, reading and SEO settings (validated against the shared site settings schema).
+  settings      Json     @default("{}")
+  /// Key of the active theme (themes are code packages registered with the API and the site runtime).
+  activeTheme   String   @default("starter") @map("active_theme") @db.VarChar(64)
+  /// Settings per theme key, validated against each theme's declared settings.
+  themeSettings Json     @default("{}") @map("theme_settings")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   roleAssignments RoleAssignment[]
+  menus           Menu[]
+  redirects       Redirect[]
   terms           Term[]
   entries         Entry[]
   media           Media[]
@@ -81,6 +89,7 @@ model User {
   trashedEntries      Entry[]              @relation("EntryTrashedBy")
   entryRevisions      EntryRevision[]
   uploadedMedia       Media[]
+  previewTokens       PreviewToken[]
 
   @@index([status])
   @@map("users")
@@ -294,6 +303,10 @@ model ContentType {
   hasExcerpt       Boolean  @default(true) @map("has_excerpt")
   hasFeaturedImage Boolean  @default(true) @map("has_featured_image")
   isSystem         Boolean  @default(false) @map("is_system")
+  /// First URL segment of entries of this type ("blog" → /blog/<path>); empty only for the built-in Page type.
+  routePrefix      String   @unique @map("route_prefix") @db.VarChar(64)
+  /// Whether entries of this type appear on the public site.
+  isPublic         Boolean  @default(true) @map("is_public")
   /// Custom field definitions; validated by the API against the shared field-definition schema.
   fields           Json     @default("[]")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -313,6 +326,9 @@ model Taxonomy {
   description  String   @default("") @db.VarChar(500)
   hierarchical Boolean  @default(false)
   isSystem     Boolean  @default(false) @map("is_system")
+  /// First URL segment of term archives ("category" → /category/<slug>).
+  routePrefix  String   @unique @map("route_prefix") @db.VarChar(64)
+  isPublic     Boolean  @default(true) @map("is_public")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -345,11 +361,12 @@ model Term {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  site     Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  taxonomy Taxonomy    @relation(fields: [taxonomyId], references: [id], onDelete: Cascade)
-  parent   Term?       @relation("TermHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children Term[]      @relation("TermHierarchy")
-  entries  EntryTerm[]
+  site      Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  taxonomy  Taxonomy    @relation(fields: [taxonomyId], references: [id], onDelete: Cascade)
+  parent    Term?       @relation("TermHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Term[]      @relation("TermHierarchy")
+  entries   EntryTerm[]
+  menuItems MenuItem[]
 
   @@unique([siteId, taxonomyId, slug])
   @@index([taxonomyId, parentId])
@@ -384,6 +401,8 @@ model Entry {
   body            Json        @default("{\"type\":\"doc\",\"content\":[]}")
   /// Custom field values keyed by field key.
   fields          Json        @default("{}")
+  /// Per-entry SEO overrides: { title, description, noindex }.
+  seo             Json        @default("{}")
   /// Lower-cased title, excerpt and body text for admin search.
   searchText      String      @default("") @map("search_text")
   featuredMediaId String?     @map("featured_media_id") @db.Uuid
@@ -406,6 +425,8 @@ model Entry {
   featuredMedia Media?          @relation(fields: [featuredMediaId], references: [id], onDelete: SetNull)
   terms         EntryTerm[]
   revisions     EntryRevision[]
+  menuItems     MenuItem[]
+  previewTokens PreviewToken[]
 
   @@unique([siteId, contentTypeId, path])
   @@index([siteId, contentTypeId, trashedAt, updatedAt])
@@ -477,4 +498,88 @@ model Media {
   @@index([uploaderId])
   @@index([mimeType])
   @@map("media")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Milestone 4: public site — menus, redirects, preview links
+// ---------------------------------------------------------------------------------------------
+
+/// A navigation menu, optionally shown at one of the active theme's menu locations.
+model Menu {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  siteId    String   @map("site_id") @db.Uuid
+  name      String   @db.VarChar(100)
+  /// Theme menu location key ("primary", "footer"); at most one menu per location.
+  location  String?  @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  site  Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  items MenuItem[]
+
+  @@unique([siteId, location])
+  @@map("menus")
+}
+
+/// A menu item pointing to an entry, a term archive, the home page or a custom URL. Items whose entry or term is
+/// deleted are deleted with it; unpublished targets are skipped when the menu is delivered.
+model MenuItem {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  menuId       String   @map("menu_id") @db.Uuid
+  parentId     String?  @map("parent_id") @db.Uuid
+  position     Int
+  label        String   @db.VarChar(200)
+  kind         String   @db.VarChar(16)
+  entryId      String?  @map("entry_id") @db.Uuid
+  termId       String?  @map("term_id") @db.Uuid
+  url          String?  @db.VarChar(2048)
+  openInNewTab Boolean  @default(false) @map("open_in_new_tab")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  menu     Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  parent   MenuItem?  @relation("MenuItemHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children MenuItem[] @relation("MenuItemHierarchy")
+  entry    Entry?     @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  term     Term?      @relation(fields: [termId], references: [id], onDelete: Cascade)
+
+  @@index([menuId, parentId, position])
+  @@index([entryId])
+  @@index([termId])
+  @@map("menu_items")
+}
+
+/// Public URL redirect. "auto" rows are created when a published entry's path or a term's slug changes.
+model Redirect {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  siteId     String   @map("site_id") @db.Uuid
+  fromPath   String   @map("from_path") @db.VarChar(2000)
+  /// A site path ("/new") or an absolute http(s) URL.
+  toPath     String   @map("to_path") @db.VarChar(2048)
+  statusCode Int      @default(301) @map("status_code") @db.SmallInt
+  source     String   @default("manual") @db.VarChar(16)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, fromPath])
+  @@index([siteId, toPath])
+  @@map("redirects")
+}
+
+/// Short-lived link that shows an entry's latest saved content on the public site. Only the SHA-256 is stored.
+model PreviewToken {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  entryId     String   @map("entry_id") @db.Uuid
+  createdById String   @map("created_by_id") @db.Uuid
+  tokenHash   Bytes    @unique @map("token_hash")
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  entry     Entry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  createdBy User  @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("preview_tokens")
 }

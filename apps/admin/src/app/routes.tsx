@@ -1,7 +1,6 @@
-import { Navigate, type RouteObject } from 'react-router';
+import type { RouteObject } from 'react-router';
 import { RequireAuth, RequireCapability } from '../features/auth/guards';
 import { LoginPage } from '../features/auth/login-page';
-import { SystemStatusPage } from '../features/system/system-status-page';
 import { AdminLayout } from '../layouts/admin-layout';
 import type { RouteHandle } from '../layouts/breadcrumbs';
 import { NotFoundPage } from '../routes/not-found-page';
@@ -11,8 +10,8 @@ const handle = (breadcrumbs: string[]): RouteHandle => ({ breadcrumbs });
 const CONTENT_READERS = ['content.read', 'content.create', 'content.edit_others'];
 
 /*
- * Sign-in and system status ship in the initial bundle; every other page is code-split and loaded on
- * first navigation (route-level `lazy`), keeping the initial download within the performance budget.
+ * Sign-in and the layout ship in the initial bundle; every page is code-split and loaded on first
+ * navigation (route-level `lazy`), keeping the initial download within the performance budget.
  */
 export const adminRoutes: RouteObject[] = [
   {
@@ -46,11 +45,75 @@ export const adminRoutes: RouteObject[] = [
     ),
     errorElement: <RouteErrorPage />,
     children: [
-      { index: true, element: <Navigate to="/system/status" replace /> },
+      {
+        index: true,
+        handle: handle(['Dashboard']),
+        lazy: async () => ({
+          Component: (await import('../features/dashboard/dashboard-page')).DashboardPage,
+        }),
+      },
       {
         path: 'system/status',
-        element: <SystemStatusPage />,
         handle: handle(['System', 'Status']),
+        lazy: async () => ({
+          Component: (await import('../features/system/system-status-page')).SystemStatusPage,
+        }),
+      },
+      {
+        path: 'appearance',
+        handle: handle(['Site', 'Appearance']),
+        lazy: async () => {
+          const { AppearancePage } = await import('../features/site/appearance-page');
+          return {
+            element: (
+              <RequireCapability capability="appearance.manage">
+                <AppearancePage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'appearance/menus',
+        handle: handle(['Site', 'Menus']),
+        lazy: async () => {
+          const { MenusPage } = await import('../features/site/menus-page');
+          return {
+            element: (
+              <RequireCapability capability="appearance.manage">
+                <MenusPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'seo',
+        handle: handle(['Site', 'SEO']),
+        lazy: async () => {
+          const { SeoPage } = await import('../features/site/seo-page');
+          return {
+            element: (
+              <RequireCapability capability="seo.manage">
+                <SeoPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'seo/redirects',
+        handle: handle(['Site', 'Redirects']),
+        lazy: async () => {
+          const { RedirectsPage } = await import('../features/site/redirects-page');
+          return {
+            element: (
+              <RequireCapability capability="seo.manage">
+                <RedirectsPage />
+              </RequireCapability>
+            ),
+          };
+        },
       },
       {
         path: 'content/:type',

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  publicTermPath,
   slugify,
   type createTermSchema,
   type TermInfo,
@@ -12,6 +13,7 @@ import type { RequestMeta } from '../../common/http/request-meta.js';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { AuditService } from '../audit/audit.service.js';
+import { RedirectsService } from '../redirects/redirects.service.js';
 import type { AuthContext } from '../security/auth-context.js';
 
 const termInclude = { _count: { select: { entries: true } } } satisfies Prisma.TermInclude;
@@ -41,6 +43,7 @@ export class TermsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly redirects: RedirectsService,
   ) {}
 
   async list(
@@ -105,15 +108,26 @@ export class TermsService {
     if (input.slug !== undefined) {
       await this.assertSlugFree(actor.siteId, term.taxonomyId, input.slug, id);
     }
-    const updated = await this.prisma.term.update({
-      where: { id },
-      data: {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.slug !== undefined ? { slug: input.slug } : {}),
-        ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-      },
-      include: termInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // The archive keeps working at its old address.
+      if (input.slug !== undefined && input.slug !== term.slug && taxonomy.isPublic) {
+        await this.redirects.recordMoves(tx, actor.siteId, [
+          {
+            from: publicTermPath(taxonomy.routePrefix, term.slug),
+            to: publicTermPath(taxonomy.routePrefix, input.slug),
+          },
+        ]);
+      }
+      return tx.term.update({
+        where: { id },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.slug !== undefined ? { slug: input.slug } : {}),
+          ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+        },
+        include: termInclude,
+      });
     });
     return toTerm(updated);
   }
@@ -135,10 +149,12 @@ export class TermsService {
     });
   }
 
-  private async requireTaxonomy(id: string): Promise<{ id: string; hierarchical: boolean }> {
+  private async requireTaxonomy(
+    id: string,
+  ): Promise<{ id: string; hierarchical: boolean; routePrefix: string; isPublic: boolean }> {
     const taxonomy = await this.prisma.taxonomy.findUnique({
       where: { id },
-      select: { id: true, hierarchical: true },
+      select: { id: true, hierarchical: true, routePrefix: true, isPublic: true },
     });
     if (!taxonomy) {
       throw new ApiException(404, 'NOT_FOUND', 'Taxonomy not found.');

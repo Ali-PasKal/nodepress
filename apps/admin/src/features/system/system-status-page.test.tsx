@@ -132,7 +132,7 @@ describe('System status page', () => {
 });
 
 describe('Routing and layout', () => {
-  it('redirects the dashboard root to system status and marks the nav item active', async () => {
+  it('opens the dashboard at the root and marks the active nav items', async () => {
     mockFetch({
       '/api/v1/auth/session': () => json(sessionFixture()),
       '/api/v1/health/ready': () => json(readiness()),
@@ -140,9 +140,30 @@ describe('Routing and layout', () => {
     });
     renderAdmin('/');
     expect(
+      await screen.findByRole('heading', { level: 1, name: 'Welcome, Site Owner' }),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', {
+        name: 'Dashboard',
+      }),
+    ).toHaveAttribute('aria-current', 'page');
+    expect(screen.getAllByRole('link', { name: /View site/ })[0]).toHaveAttribute('href', '/');
+  });
+
+  it('shows system status with its nav item and breadcrumb active', async () => {
+    mockFetch({
+      '/api/v1/auth/session': () => json(sessionFixture()),
+      '/api/v1/health/ready': () => json(readiness()),
+      '/api/v1/system/status': () => json({ installed: true }),
+    });
+    renderAdmin('/system/status');
+    expect(
       await screen.findByRole('heading', { level: 1, name: 'System status' }),
     ).toBeInTheDocument();
     const nav = screen.getByRole('navigation', { name: 'Main' });
+    expect(within(nav).getByRole('link', { name: 'Dashboard' })).not.toHaveAttribute(
+      'aria-current',
+    );
     expect(within(nav).getByRole('link', { name: 'System status' })).toHaveAttribute(
       'aria-current',
       'page',

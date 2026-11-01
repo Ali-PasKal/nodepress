@@ -2,6 +2,9 @@ import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import {
   buildFieldValuesSchema,
   EMPTY_RICH_TEXT,
+  entrySeoSchema,
+  publicEntryPath,
+  RESERVED_ROUTE_SEGMENTS,
   revisionSnapshotSchema,
   richTextDocumentSchema,
   richTextToPlainText,
@@ -10,11 +13,13 @@ import {
   type EntryBulkResponse,
   type EntryDetail,
   type EntryListResponse,
+  type EntrySeo,
   type EntryStatus,
   type EntrySummary,
   type entryBulkSchema,
   type entryListQuerySchema,
   type FieldValues,
+  type PreviewLink,
   type RevisionDetail,
   type RevisionSnapshot,
   type RevisionSummary,
@@ -32,7 +37,10 @@ import { AuditService } from '../audit/audit.service.js';
 import { defineJob } from '../jobs/job-definition.js';
 import { JobRegistry } from '../jobs/job-registry.service.js';
 import { MediaUrls, type StoredVariant } from '../media/media-urls.js';
+import { RedirectsService, type PathMove } from '../redirects/redirects.service.js';
 import type { AuthContext } from '../security/auth-context.js';
+import { generateToken, sha256 } from '../security/crypto.js';
+import { SiteService } from '../sites/site.service.js';
 import { ContentModelService, type ContentTypeDefinition } from './content-model.service.js';
 import {
   canCreate,
@@ -50,6 +58,8 @@ export const PublishScheduledJob = defineJob('content.publish_scheduled', z.obje
 export const PurgeTrashJob = defineJob('content.purge_trash', z.object({}));
 
 const MAX_PATH_LENGTH = 2_000;
+/** Lifetime of a preview link. */
+export const PREVIEW_TTL_MS = 60 * 60 * 1000;
 const LIVE: readonly EntryStatus[] = ['published', 'scheduled'];
 const FORBIDDEN = (): ApiException =>
   new ApiException(403, 'FORBIDDEN', 'You do not have permission to perform this action.');
@@ -69,6 +79,7 @@ function invalid(path: string, message: string): ApiException {
 
 const person = { select: { id: true, displayName: true } } as const;
 const entryInclude = {
+  contentType: { select: { routePrefix: true, isPublic: true } },
   author: person,
   lastEditor: person,
   terms: { select: { term: { select: { id: true, taxonomyId: true, name: true } } } },
@@ -116,6 +127,12 @@ function stableJson(value: unknown): string {
   );
 }
 
+/** Stored SEO overrides; anything unreadable falls back to the defaults. */
+function seoOf(value: Prisma.JsonValue): EntrySeo {
+  const parsed = entrySeoSchema.safeParse(value);
+  return parsed.success ? parsed.data : entrySeoSchema.parse({});
+}
+
 function searchTextOf(title: string, excerpt: string, body: RichTextDocument): string {
   return `${title}\n${excerpt}\n${richTextToPlainText(body)}`.toLowerCase().slice(0, 100_000);
 }
@@ -134,6 +151,8 @@ export class EntriesService implements OnModuleInit {
     private readonly audit: AuditService,
     private readonly registry: JobRegistry,
     private readonly mediaUrls: MediaUrls,
+    private readonly redirects: RedirectsService,
+    private readonly sites: SiteService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -244,9 +263,18 @@ export class EntriesService implements OnModuleInit {
     const id = await this.withUniquePath(async () =>
       this.prisma.$transaction(async (tx) => {
         const parentPath = await this.parentPath(tx, auth.siteId, type, content.parentId, null);
+        const reserved = await this.reservedRootSlugs(tx, type, parentPath);
         if (input.slug === undefined) {
-          content.slug = await this.uniqueSlug(tx, auth.siteId, type.id, parentPath, content.title);
+          content.slug = await this.uniqueSlug(
+            tx,
+            auth.siteId,
+            type.id,
+            parentPath,
+            content.title,
+            reserved,
+          );
         }
+        this.assertSlugNotReserved(content.slug, reserved);
         const path = this.joinPath(parentPath, content.slug);
         await this.assertPathFree(tx, auth.siteId, type.id, path, null, 'slug');
         const entry = await tx.entry.create({
@@ -266,6 +294,7 @@ export class EntriesService implements OnModuleInit {
             searchText: searchTextOf(content.title, content.excerpt, content.body),
             featuredMediaId: content.featuredMediaId,
             publishedAt,
+            seo: input.seo ?? entrySeoSchema.parse({}),
             terms: { create: content.termIds.map((termId) => ({ termId })) },
           },
           select: { id: true },
@@ -313,7 +342,9 @@ export class EntriesService implements OnModuleInit {
       'termIds',
       'featuredMediaId',
     ] as const;
-    const changesContent = contentKeys.some((key) => input[key] !== undefined);
+    const currentSeo = seoOf(current.seo);
+    const changesSeo = input.seo !== undefined && stableJson(input.seo) !== stableJson(currentSeo);
+    const changesContent = contentKeys.some((key) => input[key] !== undefined) || changesSeo;
     const nextStatus = input.status ?? current.status;
     const changesStatus = nextStatus !== current.status || input.publishedAt !== undefined;
     if (facts.trashed) {
@@ -364,6 +395,12 @@ export class EntriesService implements OnModuleInit {
             content.parentId,
             current,
           );
+          if (content.slug !== previous.slug || parentPath === null) {
+            this.assertSlugNotReserved(
+              content.slug,
+              await this.reservedRootSlugs(tx, type, parentPath),
+            );
+          }
           path = this.joinPath(parentPath, content.slug);
           await this.assertPathFree(
             tx,
@@ -388,6 +425,7 @@ export class EntriesService implements OnModuleInit {
             featuredMediaId: content.featuredMediaId,
             status: nextStatus,
             publishedAt,
+            ...(changesSeo && input.seo ? { seo: input.seo } : {}),
             lastEditorId: auth.userId,
             version: { increment: 1 },
           },
@@ -401,6 +439,10 @@ export class EntriesService implements OnModuleInit {
                SET path = ${path} || substr(path, char_length(${current.path}) + 1), updated_at = now()
              WHERE site_id = ${auth.siteId}::uuid AND content_type_id = ${type.id}::uuid
                AND path LIKE ${`${escapeLike(current.path)}/%`}`;
+          // Live addresses keep working: permanent redirects for the entry and its published descendants.
+          if (type.isPublic && current.status === 'published' && nextStatus === 'published') {
+            await this.recordPathMoves(tx, auth.siteId, type, current.path, path);
+          }
         }
         if (input.termIds !== undefined) {
           await tx.entryTerm.deleteMany({ where: { entryId: id } });
@@ -558,6 +600,21 @@ export class EntriesService implements OnModuleInit {
       }
     }
     return result;
+  }
+
+  /** Issues a short-lived link that shows the entry's latest saved content on the public site. */
+  async createPreview(auth: AuthContext, id: string): Promise<PreviewLink> {
+    const entry = await this.loadViewable(auth, id);
+    if (entry.trashedAt) {
+      throw new ApiException(409, 'CONFLICT', 'Restore this entry from the trash to preview it.');
+    }
+    const token = generateToken(32);
+    const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS);
+    await this.prisma.previewToken.create({
+      data: { entryId: id, createdById: auth.userId, tokenHash: sha256(token), expiresAt },
+    });
+    const site = await this.sites.requireDefault();
+    return { url: `${site.baseUrl}/_preview/${token}`, expiresAt: expiresAt.toISOString() };
   }
 
   // ---------------------------------------------------------------------------- revisions
@@ -878,6 +935,76 @@ export class EntriesService implements OnModuleInit {
     return parent.path;
   }
 
+  /**
+   * Slugs a root-level entry of a root type (a page directly under "/") cannot use: application paths
+   * and the route prefixes of content types and taxonomies. Empty for every other entry.
+   */
+  private async reservedRootSlugs(
+    db: DbClient,
+    type: ContentTypeDefinition,
+    parentPath: string | null,
+  ): Promise<Map<string, string>> {
+    const reserved = new Map<string, string>();
+    if (type.routePrefix !== '' || parentPath !== null) {
+      return reserved;
+    }
+    for (const segment of RESERVED_ROUTE_SEGMENTS) {
+      reserved.set(segment, 'This address is reserved by the application.');
+    }
+    const [types, taxonomies] = await Promise.all([
+      db.contentType.findMany({
+        where: { routePrefix: { not: '' } },
+        select: { routePrefix: true, name: true },
+      }),
+      db.taxonomy.findMany({ select: { routePrefix: true, name: true } }),
+    ]);
+    for (const item of [...types, ...taxonomies]) {
+      reserved.set(
+        item.routePrefix,
+        `"/${item.routePrefix}" is the address of ${item.name}. Choose another slug.`,
+      );
+    }
+    return reserved;
+  }
+
+  private assertSlugNotReserved(slug: string, reserved: ReadonlyMap<string, string>): void {
+    const message = reserved.get(slug);
+    if (message !== undefined) {
+      throw invalid('slug', message);
+    }
+  }
+
+  /** Redirects old → new public URLs for a moved published entry and its published descendants. */
+  private async recordPathMoves(
+    db: DbClient,
+    siteId: string,
+    type: ContentTypeDefinition,
+    oldPath: string,
+    newPath: string,
+  ): Promise<void> {
+    const descendants = await db.entry.findMany({
+      where: {
+        siteId,
+        contentTypeId: type.id,
+        path: { startsWith: `${newPath}/` },
+        status: 'published',
+        trashedAt: null,
+      },
+      select: { path: true },
+    });
+    const moves: PathMove[] = [
+      {
+        from: publicEntryPath(type.routePrefix, oldPath),
+        to: publicEntryPath(type.routePrefix, newPath),
+      },
+      ...descendants.map((entry) => ({
+        from: publicEntryPath(type.routePrefix, oldPath + entry.path.slice(newPath.length)),
+        to: publicEntryPath(type.routePrefix, entry.path),
+      })),
+    ];
+    await this.redirects.recordMoves(db, siteId, moves);
+  }
+
   private joinPath(parentPath: string | null, slug: string): string {
     const path = parentPath === null ? slug : `${parentPath}/${slug}`;
     if (path.length > MAX_PATH_LENGTH) {
@@ -914,17 +1041,19 @@ export class EntriesService implements OnModuleInit {
     contentTypeId: string,
     parentPath: string | null,
     title: string,
+    reserved: ReadonlyMap<string, string>,
   ): Promise<string> {
     const base = slugify(title) || 'untitled';
     const prefix = parentPath === null ? '' : `${parentPath}/`;
-    const taken = new Set(
-      (
+    const taken = new Set([
+      ...reserved.keys(),
+      ...(
         await db.entry.findMany({
           where: { siteId, contentTypeId, path: { startsWith: `${prefix}${base}` } },
           select: { path: true },
         })
       ).map((row) => row.path.slice(prefix.length)),
-    );
+    ]);
     if (!taken.has(base)) return base;
     for (let n = 2; ; n += 1) {
       const candidate = `${base.slice(0, 190).replace(/-+$/, '')}-${String(n)}`;
@@ -1002,6 +1131,7 @@ export class EntriesService implements OnModuleInit {
       title: row.title,
       slug: row.slug,
       path: row.path,
+      url: row.contentType.isPublic ? publicEntryPath(row.contentType.routePrefix, row.path) : null,
       status: row.status,
       trashedAt: row.trashedAt?.toISOString() ?? null,
       parentId: row.parentId,
@@ -1038,6 +1168,7 @@ export class EntriesService implements OnModuleInit {
       fields: content.fields,
       termIds: content.termIds,
       lastEditor: row.lastEditor,
+      seo: seoOf(row.seo),
     };
   }
 }

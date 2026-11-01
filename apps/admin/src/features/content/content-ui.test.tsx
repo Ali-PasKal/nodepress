@@ -28,6 +28,8 @@ const MODEL: ContentModelResponse = {
       hasExcerpt: true,
       hasFeaturedImage: true,
       isSystem: true,
+      routePrefix: 'blog',
+      isPublic: true,
       fields: [],
       taxonomyIds: [ID(3)],
       entryCount: 2,
@@ -43,6 +45,8 @@ const MODEL: ContentModelResponse = {
       hasExcerpt: true,
       hasFeaturedImage: true,
       isSystem: true,
+      routePrefix: '',
+      isPublic: true,
       fields: [],
       taxonomyIds: [],
       entryCount: 0,
@@ -57,6 +61,8 @@ const MODEL: ContentModelResponse = {
       description: '',
       hierarchical: true,
       isSystem: true,
+      routePrefix: 'category',
+      isPublic: true,
       contentTypeIds: [ID(1)],
       termCount: 0,
     },
@@ -146,16 +152,32 @@ describe('navigation', () => {
   it('lists content types and taxonomies from the content model, filtered by capability', () => {
     expect(
       labels(['dashboard.access', 'content.create', 'content.publish', 'media.upload']),
-    ).toEqual(['Posts', 'Pages', 'Media', 'System status']);
+    ).toEqual(['Dashboard', 'Posts', 'Pages', 'Media', 'System status']);
     expect(labels(['dashboard.access', 'content.read'])).toEqual([
+      'Dashboard',
       'Posts',
       'Pages',
       'Media',
       'System status',
     ]);
-    expect(labels(['dashboard.access'])).toEqual(['System status']);
+    expect(labels(['dashboard.access'])).toEqual(['Dashboard', 'System status']);
+    expect(labels(['dashboard.access', 'seo.manage'])).toEqual([
+      'Dashboard',
+      'SEO',
+      'Redirects',
+      'System status',
+    ]);
+    expect(labels(['dashboard.access', 'appearance.manage', 'seo.manage'])).toEqual([
+      'Dashboard',
+      'Appearance',
+      'Menus',
+      'SEO',
+      'Redirects',
+      'System status',
+    ]);
     expect(labels(['content.read', 'terms.manage', 'content_types.manage', 'jobs.manage'])).toEqual(
       [
+        'Dashboard',
         'Posts',
         'Pages',
         'Media',
@@ -203,6 +225,7 @@ describe('entries page', () => {
         title: 'Hello world',
         slug: 'hello-world',
         path: 'hello-world',
+        url: '/blog/hello-world',
         status: 'published',
         trashedAt: null,
         parentId: null,

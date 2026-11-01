@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import {
+  defaultRoutePrefix,
   fieldDefinitionsSchema,
+  publicArchivePath,
+  publicEntryPath,
+  publicTermPath,
   type ContentModelResponse,
   type ContentTypeInfo,
   type createContentTypeSchema,
@@ -15,8 +19,9 @@ import { ApiException } from '../../common/errors/api-exception.js';
 import type { RequestMeta } from '../../common/http/request-meta.js';
 import type { DbClient } from '../../infrastructure/database/db-client.js';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
-import type { Prisma } from '../../generated/prisma/client.js';
+import { Prisma } from '../../generated/prisma/client.js';
 import { AuditService } from '../audit/audit.service.js';
+import { RedirectsService, type PathMove } from '../redirects/redirects.service.js';
 import type { AuthContext } from '../security/auth-context.js';
 
 const contentTypeInclude = {
@@ -42,11 +47,38 @@ export interface ContentTypeDefinition {
   readonly hasFeaturedImage: boolean;
   readonly fields: readonly FieldDefinition[];
   readonly taxonomyIds: readonly string[];
+  /** "" for root types (pages). */
+  readonly routePrefix: string;
+  readonly isPublic: boolean;
+}
+
+function invalid(path: string, message: string): ApiException {
+  return new ApiException(422, 'VALIDATION_FAILED', 'The request contains invalid data.', [
+    { path, message },
+  ]);
 }
 
 function parseFields(value: Prisma.JsonValue): FieldDefinition[] {
   // Stored definitions were validated on write; re-parse to apply defaults and guard against drift.
   return fieldDefinitionsSchema.parse(value);
+}
+
+/** Built-in definitions first in a fixed order (they share a creation time), then custom ones by age. */
+const BUILT_IN_ORDER = ['post', 'page', 'category', 'tag'];
+function definitionOrder(
+  a: { key: string; isSystem: boolean; createdAt: Date },
+  b: { key: string; isSystem: boolean; createdAt: Date },
+): number {
+  if (a.isSystem !== b.isSystem) return a.isSystem ? -1 : 1;
+  const rank = (key: string) => {
+    const index = BUILT_IN_ORDER.indexOf(key);
+    return index === -1 ? BUILT_IN_ORDER.length : index;
+  };
+  return (
+    rank(a.key) - rank(b.key) ||
+    a.createdAt.getTime() - b.createdAt.getTime() ||
+    a.key.localeCompare(b.key)
+  );
 }
 
 function toContentType(row: ContentTypeRow): ContentTypeInfo {
@@ -61,6 +93,8 @@ function toContentType(row: ContentTypeRow): ContentTypeInfo {
     hasExcerpt: row.hasExcerpt,
     hasFeaturedImage: row.hasFeaturedImage,
     isSystem: row.isSystem,
+    routePrefix: row.routePrefix,
+    isPublic: row.isPublic,
     fields: parseFields(row.fields),
     taxonomyIds: row.taxonomies.map((link) => link.taxonomyId),
     entryCount: row._count.entries,
@@ -76,6 +110,8 @@ function toTaxonomy(row: TaxonomyRow): TaxonomyInfo {
     description: row.description,
     hierarchical: row.hierarchical,
     isSystem: row.isSystem,
+    routePrefix: row.routePrefix,
+    isPublic: row.isPublic,
     contentTypeIds: row.contentTypes.map((link) => link.contentTypeId),
     termCount: row._count.terms,
   };
@@ -87,22 +123,17 @@ export class ContentModelService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly redirects: RedirectsService,
   ) {}
 
   async model(): Promise<ContentModelResponse> {
     const [contentTypes, taxonomies] = await Promise.all([
-      this.prisma.contentType.findMany({
-        include: contentTypeInclude,
-        orderBy: [{ isSystem: 'desc' }, { createdAt: 'asc' }],
-      }),
-      this.prisma.taxonomy.findMany({
-        include: taxonomyInclude,
-        orderBy: [{ isSystem: 'desc' }, { createdAt: 'asc' }],
-      }),
+      this.prisma.contentType.findMany({ include: contentTypeInclude }),
+      this.prisma.taxonomy.findMany({ include: taxonomyInclude }),
     ]);
     return {
-      contentTypes: contentTypes.map(toContentType),
-      taxonomies: taxonomies.map(toTaxonomy),
+      contentTypes: contentTypes.sort(definitionOrder).map(toContentType),
+      taxonomies: taxonomies.sort(definitionOrder).map(toTaxonomy),
     };
   }
 
@@ -140,7 +171,90 @@ export class ContentModelService {
       hasFeaturedImage: row.hasFeaturedImage,
       fields: parseFields(row.fields),
       taxonomyIds: row.taxonomies.map((link) => link.taxonomyId),
+      routePrefix: row.routePrefix,
+      isPublic: row.isPublic,
     };
+  }
+
+  // ------------------------------------------------------------------ routes
+
+  /**
+   * A route prefix must be unique across content types and taxonomies and must not be the first
+   * segment of a page at the site root (pages own the root namespace below the prefixes).
+   */
+  private async assertPrefixAvailable(
+    db: DbClient,
+    prefix: string,
+    except: { contentTypeId?: string; taxonomyId?: string },
+  ): Promise<void> {
+    const [type, taxonomy, page] = await Promise.all([
+      db.contentType.findFirst({
+        where: {
+          routePrefix: prefix,
+          ...(except.contentTypeId ? { NOT: { id: except.contentTypeId } } : {}),
+        },
+        select: { name: true },
+      }),
+      db.taxonomy.findFirst({
+        where: {
+          routePrefix: prefix,
+          ...(except.taxonomyId ? { NOT: { id: except.taxonomyId } } : {}),
+        },
+        select: { name: true },
+      }),
+      db.entry.findFirst({
+        where: {
+          contentType: { routePrefix: '' },
+          OR: [{ path: prefix }, { path: { startsWith: `${prefix}/` } }],
+        },
+        select: { title: true },
+      }),
+    ]);
+    if (type) {
+      throw invalid('routePrefix', `The content type "${type.name}" already uses this address.`);
+    }
+    if (taxonomy) {
+      throw invalid('routePrefix', `The taxonomy "${taxonomy.name}" already uses this address.`);
+    }
+    if (page) {
+      throw invalid(
+        'routePrefix',
+        `A page already uses this address ("/${prefix}"). Change the page's slug first.`,
+      );
+    }
+  }
+
+  /**
+   * Redirects for a content type's published entries (and its archive) after a prefix change, per site.
+   * Definitions are instance-wide while entries and redirects belong to a site.
+   */
+  private async recordContentTypeMoves(
+    db: DbClient,
+    type: { id: string; hierarchical: boolean },
+    from: string,
+    to: string,
+  ): Promise<number> {
+    const [sites, entries] = await Promise.all([
+      db.site.findMany({ select: { id: true } }),
+      db.entry.findMany({
+        where: { contentTypeId: type.id, status: 'published', trashedAt: null },
+        select: { siteId: true, path: true },
+      }),
+    ]);
+    let moved = 0;
+    for (const site of sites) {
+      const moves: PathMove[] = entries
+        .filter((entry) => entry.siteId === site.id)
+        .map((entry) => ({
+          from: publicEntryPath(from, entry.path),
+          to: publicEntryPath(to, entry.path),
+        }));
+      if (!type.hierarchical) {
+        moves.push({ from: publicArchivePath(from), to: publicArchivePath(to) });
+      }
+      moved += await this.redirects.recordMoves(db, site.id, moves);
+    }
+    return moved;
   }
 
   // ------------------------------------------------------------------ content types
@@ -158,32 +272,38 @@ export class ContentModelService {
         { path: 'key', message: 'A content type with this key already exists.' },
       ]);
     }
-    const id = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.contentType.create({
-        data: {
-          key: input.key,
-          name: input.name,
-          pluralName: input.pluralName,
-          description: input.description,
-          hierarchical: input.hierarchical,
-          hasBody: input.hasBody,
-          hasExcerpt: input.hasExcerpt,
-          hasFeaturedImage: input.hasFeaturedImage,
-          fields: input.fields,
-          taxonomies: { create: input.taxonomyIds.map((taxonomyId) => ({ taxonomyId })) },
-        },
-        select: { id: true },
-      });
-      await this.audit.record(tx, {
-        action: 'content_type.created',
-        actorUserId: actor.userId,
-        targetType: 'content_type',
-        targetId: created.id,
-        request: meta,
-        metadata: { key: input.key },
-      });
-      return created.id;
-    });
+    const routePrefix = input.routePrefix ?? defaultRoutePrefix(input.key);
+    await this.assertPrefixAvailable(this.prisma, routePrefix, {});
+    const id = await this.withUniquePrefix(async () =>
+      this.prisma.$transaction(async (tx) => {
+        const created = await tx.contentType.create({
+          data: {
+            key: input.key,
+            routePrefix,
+            isPublic: input.isPublic,
+            name: input.name,
+            pluralName: input.pluralName,
+            description: input.description,
+            hierarchical: input.hierarchical,
+            hasBody: input.hasBody,
+            hasExcerpt: input.hasExcerpt,
+            hasFeaturedImage: input.hasFeaturedImage,
+            fields: input.fields,
+            taxonomies: { create: input.taxonomyIds.map((taxonomyId) => ({ taxonomyId })) },
+          },
+          select: { id: true },
+        });
+        await this.audit.record(tx, {
+          action: 'content_type.created',
+          actorUserId: actor.userId,
+          targetType: 'content_type',
+          targetId: created.id,
+          request: meta,
+          metadata: { key: input.key, routePrefix },
+        });
+        return created.id;
+      }),
+    );
     return this.contentTypeInfo(id);
   }
 
@@ -215,37 +335,66 @@ export class ContentModelService {
     if (input.taxonomyIds) {
       await this.assertTaxonomiesExist(input.taxonomyIds);
     }
-    await this.prisma.$transaction(async (tx) => {
-      await tx.contentType.update({
-        where: { id },
-        data: {
-          ...(input.name !== undefined ? { name: input.name } : {}),
-          ...(input.pluralName !== undefined ? { pluralName: input.pluralName } : {}),
-          ...(input.description !== undefined ? { description: input.description } : {}),
-          ...(input.hierarchical !== undefined ? { hierarchical: input.hierarchical } : {}),
-          ...(input.hasBody !== undefined ? { hasBody: input.hasBody } : {}),
-          ...(input.hasExcerpt !== undefined ? { hasExcerpt: input.hasExcerpt } : {}),
-          ...(input.hasFeaturedImage !== undefined
-            ? { hasFeaturedImage: input.hasFeaturedImage }
-            : {}),
-          ...(input.fields !== undefined ? { fields: input.fields } : {}),
-        },
-      });
-      if (input.taxonomyIds) {
-        await tx.contentTypeTaxonomy.deleteMany({ where: { contentTypeId: id } });
-        await tx.contentTypeTaxonomy.createMany({
-          data: input.taxonomyIds.map((taxonomyId) => ({ contentTypeId: id, taxonomyId })),
+    const prefixChanges =
+      input.routePrefix !== undefined && input.routePrefix !== existing.routePrefix;
+    if (prefixChanges && existing.routePrefix === '') {
+      throw invalid('routePrefix', 'Pages always live at the site root.');
+    }
+    if (prefixChanges && input.routePrefix !== undefined) {
+      await this.assertPrefixAvailable(this.prisma, input.routePrefix, { contentTypeId: id });
+    }
+    const nextPublic = input.isPublic ?? existing.isPublic;
+    await this.withUniquePrefix(async () =>
+      this.prisma.$transaction(async (tx) => {
+        // Published entries keep working at their old addresses through permanent redirects.
+        let moved = 0;
+        if (prefixChanges && input.routePrefix !== undefined && existing.isPublic && nextPublic) {
+          moved = await this.recordContentTypeMoves(
+            tx,
+            existing,
+            existing.routePrefix,
+            input.routePrefix,
+          );
+        }
+        await tx.contentType.update({
+          where: { id },
+          data: {
+            ...(input.routePrefix !== undefined ? { routePrefix: input.routePrefix } : {}),
+            ...(input.isPublic !== undefined ? { isPublic: input.isPublic } : {}),
+            ...(input.name !== undefined ? { name: input.name } : {}),
+            ...(input.pluralName !== undefined ? { pluralName: input.pluralName } : {}),
+            ...(input.description !== undefined ? { description: input.description } : {}),
+            ...(input.hierarchical !== undefined ? { hierarchical: input.hierarchical } : {}),
+            ...(input.hasBody !== undefined ? { hasBody: input.hasBody } : {}),
+            ...(input.hasExcerpt !== undefined ? { hasExcerpt: input.hasExcerpt } : {}),
+            ...(input.hasFeaturedImage !== undefined
+              ? { hasFeaturedImage: input.hasFeaturedImage }
+              : {}),
+            ...(input.fields !== undefined ? { fields: input.fields } : {}),
+          },
         });
-      }
-      await this.audit.record(tx, {
-        action: 'content_type.updated',
-        actorUserId: actor.userId,
-        targetType: 'content_type',
-        targetId: id,
-        request: meta,
-        metadata: { key: existing.key, changed: Object.keys(input).sort() },
-      });
-    });
+        if (input.taxonomyIds) {
+          await tx.contentTypeTaxonomy.deleteMany({ where: { contentTypeId: id } });
+          await tx.contentTypeTaxonomy.createMany({
+            data: input.taxonomyIds.map((taxonomyId) => ({ contentTypeId: id, taxonomyId })),
+          });
+        }
+        await this.audit.record(tx, {
+          action: 'content_type.updated',
+          actorUserId: actor.userId,
+          targetType: 'content_type',
+          targetId: id,
+          request: meta,
+          metadata: {
+            key: existing.key,
+            changed: Object.keys(input).sort(),
+            ...(prefixChanges && input.routePrefix !== undefined
+              ? { routePrefix: input.routePrefix, redirects: moved }
+              : {}),
+          },
+        });
+      }),
+    );
     return this.contentTypeInfo(id);
   }
 
@@ -314,30 +463,36 @@ export class ContentModelService {
         { path: 'key', message: 'A taxonomy with this key already exists.' },
       ]);
     }
-    const id = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.taxonomy.create({
-        data: {
-          key: input.key,
-          name: input.name,
-          pluralName: input.pluralName,
-          description: input.description,
-          hierarchical: input.hierarchical,
-          contentTypes: {
-            create: input.contentTypeIds.map((contentTypeId) => ({ contentTypeId })),
+    const routePrefix = input.routePrefix ?? defaultRoutePrefix(input.key);
+    await this.assertPrefixAvailable(this.prisma, routePrefix, {});
+    const id = await this.withUniquePrefix(async () =>
+      this.prisma.$transaction(async (tx) => {
+        const created = await tx.taxonomy.create({
+          data: {
+            key: input.key,
+            routePrefix,
+            isPublic: input.isPublic,
+            name: input.name,
+            pluralName: input.pluralName,
+            description: input.description,
+            hierarchical: input.hierarchical,
+            contentTypes: {
+              create: input.contentTypeIds.map((contentTypeId) => ({ contentTypeId })),
+            },
           },
-        },
-        select: { id: true },
-      });
-      await this.audit.record(tx, {
-        action: 'taxonomy.created',
-        actorUserId: actor.userId,
-        targetType: 'taxonomy',
-        targetId: created.id,
-        request: meta,
-        metadata: { key: input.key },
-      });
-      return created.id;
-    });
+          select: { id: true },
+        });
+        await this.audit.record(tx, {
+          action: 'taxonomy.created',
+          actorUserId: actor.userId,
+          targetType: 'taxonomy',
+          targetId: created.id,
+          request: meta,
+          metadata: { key: input.key, routePrefix },
+        });
+        return created.id;
+      }),
+    );
     return this.taxonomyInfo(id);
   }
 
@@ -349,7 +504,7 @@ export class ContentModelService {
   ): Promise<TaxonomyInfo> {
     const existing = await this.prisma.taxonomy.findUnique({
       where: { id },
-      select: { key: true },
+      select: { key: true, routePrefix: true, isPublic: true },
     });
     if (!existing) {
       throw new ApiException(404, 'NOT_FOUND', 'Taxonomy not found.');
@@ -357,30 +512,66 @@ export class ContentModelService {
     if (input.contentTypeIds) {
       await this.assertContentTypesExist(input.contentTypeIds);
     }
-    await this.prisma.$transaction(async (tx) => {
-      await tx.taxonomy.update({
-        where: { id },
-        data: {
-          ...(input.name !== undefined ? { name: input.name } : {}),
-          ...(input.pluralName !== undefined ? { pluralName: input.pluralName } : {}),
-          ...(input.description !== undefined ? { description: input.description } : {}),
-        },
-      });
-      if (input.contentTypeIds) {
-        await tx.contentTypeTaxonomy.deleteMany({ where: { taxonomyId: id } });
-        await tx.contentTypeTaxonomy.createMany({
-          data: input.contentTypeIds.map((contentTypeId) => ({ contentTypeId, taxonomyId: id })),
+    const prefixChanges =
+      input.routePrefix !== undefined && input.routePrefix !== existing.routePrefix;
+    if (prefixChanges && input.routePrefix !== undefined) {
+      await this.assertPrefixAvailable(this.prisma, input.routePrefix, { taxonomyId: id });
+    }
+    const nextPublic = input.isPublic ?? existing.isPublic;
+    await this.withUniquePrefix(async () =>
+      this.prisma.$transaction(async (tx) => {
+        let moved = 0;
+        if (prefixChanges && input.routePrefix !== undefined && existing.isPublic && nextPublic) {
+          const to = input.routePrefix;
+          const terms = await tx.term.findMany({
+            where: { taxonomyId: id },
+            select: { siteId: true, slug: true },
+          });
+          const bySite = new Map<string, PathMove[]>();
+          for (const term of terms) {
+            const list = bySite.get(term.siteId) ?? [];
+            list.push({
+              from: publicTermPath(existing.routePrefix, term.slug),
+              to: publicTermPath(to, term.slug),
+            });
+            bySite.set(term.siteId, list);
+          }
+          for (const [siteId, moves] of bySite) {
+            moved += await this.redirects.recordMoves(tx, siteId, moves);
+          }
+        }
+        await tx.taxonomy.update({
+          where: { id },
+          data: {
+            ...(input.routePrefix !== undefined ? { routePrefix: input.routePrefix } : {}),
+            ...(input.isPublic !== undefined ? { isPublic: input.isPublic } : {}),
+            ...(input.name !== undefined ? { name: input.name } : {}),
+            ...(input.pluralName !== undefined ? { pluralName: input.pluralName } : {}),
+            ...(input.description !== undefined ? { description: input.description } : {}),
+          },
         });
-      }
-      await this.audit.record(tx, {
-        action: 'taxonomy.updated',
-        actorUserId: actor.userId,
-        targetType: 'taxonomy',
-        targetId: id,
-        request: meta,
-        metadata: { key: existing.key, changed: Object.keys(input).sort() },
-      });
-    });
+        if (input.contentTypeIds) {
+          await tx.contentTypeTaxonomy.deleteMany({ where: { taxonomyId: id } });
+          await tx.contentTypeTaxonomy.createMany({
+            data: input.contentTypeIds.map((contentTypeId) => ({ contentTypeId, taxonomyId: id })),
+          });
+        }
+        await this.audit.record(tx, {
+          action: 'taxonomy.updated',
+          actorUserId: actor.userId,
+          targetType: 'taxonomy',
+          targetId: id,
+          request: meta,
+          metadata: {
+            key: existing.key,
+            changed: Object.keys(input).sort(),
+            ...(prefixChanges && input.routePrefix !== undefined
+              ? { routePrefix: input.routePrefix, redirects: moved }
+              : {}),
+          },
+        });
+      }),
+    );
     return this.taxonomyInfo(id);
   }
 
@@ -413,6 +604,18 @@ export class ContentModelService {
     return toTaxonomy(
       await this.prisma.taxonomy.findUniqueOrThrow({ where: { id }, include: taxonomyInclude }),
     );
+  }
+
+  /** Maps a race on the unique route prefix to a validation error. */
+  private async withUniquePrefix<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw invalid('routePrefix', 'Another content type or taxonomy already uses this address.');
+      }
+      throw error;
+    }
   }
 
   private async assertContentTypesExist(ids: readonly string[]): Promise<void> {

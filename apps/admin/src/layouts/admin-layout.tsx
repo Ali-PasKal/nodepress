@@ -7,7 +7,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@nexora/ui';
-import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { ExternalLink, Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useState } from 'react';
 import { Outlet } from 'react-router';
 import { Brand } from '../components/brand';
@@ -109,6 +109,15 @@ export function AdminLayout() {
             <Breadcrumbs />
           </div>
           <CommandPalette />
+          <a
+            href="/"
+            target="_blank"
+            rel="noopener"
+            className="hidden h-9 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground sm:inline-flex"
+          >
+            <ExternalLink className="size-4" aria-hidden="true" />
+            View site
+          </a>
           <ThemeToggle />
           <UserMenu />
         </header>

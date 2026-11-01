@@ -5,6 +5,7 @@ import {
   slugify,
   type ContentTypeInfo,
   type EntryDetail,
+  type EntrySeo,
   type EntryStatus,
   type RichTextDocument,
   type TaxonomyInfo,
@@ -19,6 +20,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Checkbox,
   ConfirmDialog,
   Dialog,
   DialogContent,
@@ -32,7 +34,17 @@ import {
   Skeleton,
   Textarea,
 } from '@nexora/ui';
-import { ArrowLeft, History, ImageIcon, Loader2, RotateCcw, Trash2, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ExternalLink,
+  Eye,
+  History,
+  ImageIcon,
+  Loader2,
+  RotateCcw,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useBlocker, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -50,6 +62,7 @@ import {
   useEntry,
   useEntryAction,
   useFetchLatestEntry,
+  usePreviewLink,
   useRestoreRevision,
   useRevision,
   useRevisions,
@@ -62,6 +75,7 @@ import { EntryStatusBadge } from './status-badge';
 import { CategoryChecklist, TagInput } from './term-pickers';
 
 interface FormValues {
+  seo: EntrySeo;
   title: string;
   slug: string;
   excerpt: string;
@@ -85,9 +99,12 @@ function stable(value: unknown): string {
   );
 }
 
+const EMPTY_SEO: EntrySeo = { title: '', description: '', noindex: false };
+
 function valuesFrom(entry: EntryDetail | null): FormValues {
   return entry
     ? {
+        seo: entry.seo,
         title: entry.title,
         slug: entry.slug,
         excerpt: entry.excerpt,
@@ -98,6 +115,7 @@ function valuesFrom(entry: EntryDetail | null): FormValues {
         parentId: entry.parentId,
       }
     : {
+        seo: EMPTY_SEO,
         title: '',
         slug: '',
         excerpt: '',
@@ -291,6 +309,93 @@ function RevisionsDialog({
   );
 }
 
+/** Search appearance: overrides for the page title and description, and opting out of indexing. */
+function SeoPanel({
+  seo,
+  title,
+  excerpt,
+  url,
+  disabled,
+  errors,
+  onChange,
+}: {
+  seo: EntrySeo;
+  title: string;
+  excerpt: string;
+  url: string | null;
+  disabled: boolean;
+  errors: Record<string, string>;
+  onChange: (seo: EntrySeo) => void;
+}) {
+  const shownTitle = seo.title || title || 'Untitled';
+  const shownDescription = seo.description || excerpt;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Search appearance</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <div
+          className="rounded-md border bg-muted/40 p-3 text-sm"
+          aria-label="Search result preview"
+        >
+          <p className="truncate text-xs text-muted-foreground">{url ?? 'Not public'}</p>
+          <p className="truncate font-medium text-primary">{shownTitle}</p>
+          <p className="line-clamp-2 text-xs text-muted-foreground">
+            {shownDescription || 'No description: search engines pick text from the page.'}
+          </p>
+        </div>
+        <Field
+          label="SEO title"
+          description={`${String(seo.title.length)}/200 · empty uses the title; about 60 characters show in results.`}
+          error={errors['seo.title']}
+        >
+          {(control) => (
+            <Input
+              {...control}
+              value={seo.title}
+              maxLength={200}
+              disabled={disabled}
+              placeholder={title}
+              onChange={(event) => {
+                onChange({ ...seo, title: event.target.value });
+              }}
+            />
+          )}
+        </Field>
+        <Field
+          label="Meta description"
+          description={`${String(seo.description.length)}/320 · empty uses the excerpt.`}
+          error={errors['seo.description']}
+        >
+          {(control) => (
+            <Textarea
+              {...control}
+              value={seo.description}
+              maxLength={320}
+              disabled={disabled}
+              placeholder={excerpt}
+              onChange={(event) => {
+                onChange({ ...seo, description: event.target.value });
+              }}
+            />
+          )}
+        </Field>
+        <Label className="flex items-center gap-2 text-sm font-normal">
+          <Checkbox
+            checked={seo.noindex}
+            disabled={disabled}
+            onChange={(event) => {
+              onChange({ ...seo, noindex: event.target.checked });
+            }}
+          />
+          Hide from search engines (noindex)
+        </Label>
+      </CardContent>
+    </Card>
+  );
+}
+
 function EntryEditor({
   type,
   taxonomies,
@@ -305,6 +410,7 @@ function EntryEditor({
   const create = useCreateEntry();
   const update = useUpdateEntry();
   const entryAction = useEntryAction();
+  const previewLink = usePreviewLink();
   const fetchLatest = useFetchLatestEntry();
   const [reloading, setReloading] = useState(false);
   const [entry, setEntry] = useState<EntryDetail | null>(initial);
@@ -407,6 +513,8 @@ function EntryEditor({
             'termIds',
             'featuredMediaId',
             'body',
+            'seo.title',
+            'seo.description',
           ].includes(issue.path) || issue.path.startsWith('fields.');
         if (known) mapped[issue.path] = issue.message;
         else unattached.push(issue.message);
@@ -468,6 +576,7 @@ function EntryEditor({
           termIds: values.termIds,
           featuredMediaId: values.featuredMediaId,
           parentId: values.parentId,
+          seo: values.seo,
           status: status ?? 'draft',
           ...(publishedAt ? { publishedAt } : {}),
         },
@@ -825,6 +934,40 @@ function EntryEditor({
                   )}
                 </div>
               )}
+              {entry && !trashed && (
+                <div className="flex flex-wrap gap-2 border-t pt-3">
+                  {entry.status === 'published' && entry.url !== null && (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={entry.url} target="_blank" rel="noopener">
+                        <ExternalLink aria-hidden="true" /> View
+                      </a>
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={previewLink.isPending}
+                    onClick={() => {
+                      // Open the tab synchronously (popup blockers) and point it at the link once issued.
+                      const tab = window.open('about:blank', '_blank');
+                      if (tab) tab.opener = null;
+                      previewLink.mutate(entry.id, {
+                        onSuccess: (link) => {
+                          if (tab) tab.location.href = link.url;
+                          else window.location.assign(link.url);
+                          if (dirty) toast.info('The preview shows the last saved version.');
+                        },
+                        onError: (error) => {
+                          tab?.close();
+                          toast.error(errorMessage(error));
+                        },
+                      });
+                    }}
+                  >
+                    <Eye aria-hidden="true" /> Preview
+                  </Button>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2 border-t pt-3">
                 {entry && (
                   <Button
@@ -974,6 +1117,18 @@ function EntryEditor({
               </CardContent>
             </Card>
           )}
+
+          <SeoPanel
+            seo={values.seo}
+            title={values.title}
+            excerpt={values.excerpt}
+            url={entry?.url ?? null}
+            disabled={!editable || trashed}
+            errors={errors}
+            onChange={(seo) => {
+              set('seo', seo);
+            }}
+          />
         </div>
       </div>
 

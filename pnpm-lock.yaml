@@ -159,6 +159,9 @@ importers:
       '@nexora/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@nexora/theme-starter':
+        specifier: workspace:*
+        version: link:../../packages/theme-starter
       '@node-rs/argon2':
         specifier: 2.2.2
         version: 2.2.2
@@ -260,6 +263,64 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@types/node@22.20.5)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0))
 
+  apps/site-runtime:
+    dependencies:
+      '@nexora/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@nexora/theme-sdk':
+        specifier: workspace:*
+        version: link:../../packages/theme-sdk
+      '@nexora/theme-starter':
+        specifier: workspace:*
+        version: link:../../packages/theme-starter
+      express:
+        specifier: 5.3.0
+        version: 5.3.0
+      helmet:
+        specifier: 8.3.0
+        version: 8.3.0
+      pino:
+        specifier: 10.4.0
+        version: 10.4.0
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/express':
+        specifier: 5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: 22.20.5
+        version: 22.20.5
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      '@types/supertest':
+        specifier: 7.2.1
+        version: 7.2.1
+      supertest:
+        specifier: 7.3.1
+        version: 7.3.1
+      tsc-watch:
+        specifier: 7.2.1
+        version: 7.2.1(typescript@6.0.3)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@22.20.5)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0))
+
   packages/cli:
     devDependencies:
       '@types/node':
@@ -275,6 +336,62 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@22.20.5)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0))
+
+  packages/theme-sdk:
+    dependencies:
+      '@nexora/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@22.20.5)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0))
+
+  packages/theme-starter:
+    dependencies:
+      '@nexora/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@nexora/theme-sdk':
+        specifier: workspace:*
+        version: link:../theme-sdk
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.5
+        version: 22.20.5
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
       typescript:
         specifier: 6.0.3
         version: 6.0.3

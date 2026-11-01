@@ -12,13 +12,16 @@ import { buildLoggerOptions } from './logging/logger-options.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { SystemModule } from './modules/system/system.module.js';
 import { AccountModule } from './modules/account/account.module.js';
+import { AppearanceModule } from './modules/appearance/appearance.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ContentModule } from './modules/content/content.module.js';
+import { DeliveryModule } from './modules/delivery/delivery.module.js';
 import { JobsModule } from './modules/jobs/jobs.module.js';
 import { MailModule } from './modules/mail/mail.module.js';
 import { MediaModule } from './modules/media/media.module.js';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module.js';
+import { RedirectsModule } from './modules/redirects/redirects.module.js';
 import { RolesModule } from './modules/roles/roles.module.js';
 import { SecurityModule } from './modules/security/security.module.js';
 import { SettingsModule } from './modules/settings/settings.module.js';
@@ -61,6 +64,9 @@ export class AppModule {
         MaintenanceModule,
         ContentModule,
         MediaModule,
+        RedirectsModule,
+        AppearanceModule,
+        DeliveryModule,
       ],
       providers: [
         { provide: APP_FILTER, useClass: GlobalExceptionFilter },

@@ -28,20 +28,29 @@ export async function dev(options: { infra: boolean }): Promise<number> {
 
   heading('Preparing workspace');
   const prepared = await runSteps([
-    ['pnpm', ['--filter', '@nexora/shared', 'run', 'build']],
+    // Shared contracts and the themes (the API reads theme manifests; the site renders with them).
+    ['pnpm', ['--filter', '@nexora/theme-starter...', 'run', 'build']],
     ['pnpm', ['--filter', '@nexora/api', 'exec', 'prisma', 'migrate', 'deploy']],
   ]);
   if (prepared !== 0) {
     return prepared;
   }
 
-  heading('Starting API (http://localhost:3000) and admin (http://localhost:5173/admin/)');
+  heading(
+    'Starting API (:3000), site runtime (:4321) and admin — open http://localhost:5173/ (site) and http://localhost:5173/admin/',
+  );
   return run('pnpm', [
     '--parallel',
     '--filter',
     '@nexora/shared',
     '--filter',
+    '@nexora/theme-sdk',
+    '--filter',
+    '@nexora/theme-starter',
+    '--filter',
     '@nexora/api',
+    '--filter',
+    '@nexora/site-runtime',
     '--filter',
     '@nexora/admin',
     'run',

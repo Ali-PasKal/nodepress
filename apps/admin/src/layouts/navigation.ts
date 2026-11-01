@@ -6,9 +6,14 @@ import {
   FileText,
   FolderTree,
   Image,
+  LayoutDashboard,
   ListChecks,
+  ListTree,
   Newspaper,
+  Palette,
+  Route,
   ScrollText,
+  Search,
   Settings,
   ShieldCheck,
   Tags,
@@ -24,6 +29,8 @@ export interface NavItem {
   readonly capability?: CoreCapability;
   /** Hidden unless the user holds at least one of these. */
   readonly anyOf?: readonly CoreCapability[];
+  /** Active only on this exact path (not on sub-paths). */
+  readonly end?: boolean;
 }
 
 export interface NavGroup {
@@ -56,6 +63,7 @@ function contentGroup(model: ContentModelResponse | undefined): NavGroup {
   return {
     label: 'Content',
     items: [
+      { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
       ...types,
       {
         to: '/media',
@@ -72,6 +80,26 @@ function contentGroup(model: ContentModelResponse | undefined): NavGroup {
 export function buildNavigation(model?: ContentModelResponse): readonly NavGroup[] {
   return [
     contentGroup(model),
+    {
+      label: 'Site',
+      items: [
+        {
+          to: '/appearance',
+          label: 'Appearance',
+          icon: Palette,
+          capability: 'appearance.manage',
+          end: true,
+        },
+        {
+          to: '/appearance/menus',
+          label: 'Menus',
+          icon: ListTree,
+          capability: 'appearance.manage',
+        },
+        { to: '/seo', label: 'SEO', icon: Search, capability: 'seo.manage', end: true },
+        { to: '/seo/redirects', label: 'Redirects', icon: Route, capability: 'seo.manage' },
+      ],
+    },
     {
       label: 'People',
       items: [
@@ -96,7 +124,13 @@ export function buildNavigation(model?: ContentModelResponse): readonly NavGroup
           icon: Blocks,
           capability: 'content_types.manage',
         },
-        { to: '/settings', label: 'Settings', icon: Settings, capability: 'system.manage' },
+        {
+          to: '/settings',
+          label: 'Settings',
+          icon: Settings,
+          capability: 'system.manage',
+          end: true,
+        },
       ],
     },
   ];

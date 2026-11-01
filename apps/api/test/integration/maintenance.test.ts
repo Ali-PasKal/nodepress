@@ -9,6 +9,7 @@ import {
   signIn,
   withDb,
 } from '../helpers/identity.js';
+import { createEntry } from '../helpers/content.js';
 import type { TestApp } from '../helpers/test-app.js';
 
 const DAY = 86_400_000;
@@ -26,6 +27,7 @@ describe('maintenance cleanup', () => {
   it('purges expired security records and finished jobs, keeping everything recent', async () => {
     const owner = await signIn(testApp.server, OWNER.email, OWNER.password);
     const RANDOM_HASH = `decode(md5(random()::text) || md5(random()::text), 'hex')`;
+    const entry = await createEntry(owner, { title: 'Draft with preview links' });
     await withDb(async (db) => {
       const insertSession = `INSERT INTO sessions
           (id, user_id, token_hash, created_at, last_seen_at, expires_at, revoked_at)
@@ -63,6 +65,11 @@ describe('maintenance cleanup', () => {
         ('stale-worker', 'h', 1, $1, $1), ('live-worker', 'h', 2, $2, $2)`,
         [ago(2 * DAY), new Date()],
       );
+
+      const preview = `INSERT INTO preview_tokens (id, entry_id, created_by_id, token_hash, created_at, expires_at)
+        VALUES (gen_random_uuid(), $1, $2, ${RANDOM_HASH}, $3::timestamptz - interval '1 hour', $3)`;
+      await db.query(preview, [entry.id, owner.userId, ago(60_000)]);
+      await db.query(preview, [entry.id, owner.userId, new Date(Date.now() + 30 * 60_000)]);
     });
 
     const result = await testApp.app.get(MaintenanceService).cleanup();
@@ -72,6 +79,7 @@ describe('maintenance cleanup', () => {
       rateLimitBuckets: 1,
       jobs: 2,
       workers: 1,
+      previewTokens: 1,
     });
     // The signed-in owner's live session survives.
     await owner.agent.get('/api/v1/account/profile').expect(200);
@@ -81,10 +89,11 @@ describe('maintenance cleanup', () => {
           await db.query(`SELECT
             (SELECT count(*)::int FROM password_reset_tokens) AS tokens,
             (SELECT count(*)::int FROM jobs WHERE name = 'test.cleanup') AS jobs,
-            (SELECT array_agg(id) FROM job_workers) AS workers`)
-        ).rows[0] as { tokens: number; jobs: number; workers: string[] },
+            (SELECT array_agg(id) FROM job_workers) AS workers,
+            (SELECT count(*)::int FROM preview_tokens) AS previews`)
+        ).rows[0] as { tokens: number; jobs: number; workers: string[]; previews: number },
     );
-    expect(remaining).toEqual({ tokens: 1, jobs: 2, workers: ['live-worker'] });
+    expect(remaining).toEqual({ tokens: 1, jobs: 2, workers: ['live-worker'], previews: 1 });
   });
 
   it('is scheduled hourly as a recurring job', async () => {

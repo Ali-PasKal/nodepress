@@ -14,6 +14,8 @@ const baseField = z.object({
   label: z.string().trim().min(1, { message: 'Label is required.' }).max(100),
   description: z.string().trim().max(300).default(''),
   required: z.boolean().default(false),
+  /** Shown on the public site and returned by the Delivery API. Off by default (data minimisation). */
+  public: z.boolean().default(false),
 });
 
 export const FIELD_TYPES = [

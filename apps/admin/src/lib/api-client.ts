@@ -62,7 +62,7 @@ export interface ApiRequestOptions {
   readonly acceptStatuses?: readonly number[];
 }
 
-type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 async function request(
   method: Method,

@@ -15,8 +15,11 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
 # Every workspace manifest is copied so the frozen lockfile matches the workspace exactly.
 COPY apps/api/package.json apps/api/
 COPY apps/admin/package.json apps/admin/
+COPY apps/site-runtime/package.json apps/site-runtime/
 COPY packages/shared/package.json packages/shared/
 COPY packages/ui/package.json packages/ui/
+COPY packages/theme-sdk/package.json packages/theme-sdk/
+COPY packages/theme-starter/package.json packages/theme-starter/
 COPY packages/cli/package.json packages/cli/
 COPY packages/cli/bin packages/cli/bin
 # Optional extra CA for builds behind a TLS-intercepting proxy. Passed as a BuildKit secret so it is

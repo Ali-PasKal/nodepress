@@ -3,6 +3,7 @@ import {
   entryBulkResponseSchema,
   entryDetailSchema,
   entryListResponseSchema,
+  previewLinkSchema,
   revisionDetailSchema,
   revisionSummarySchema,
   taxonomySchema,
@@ -148,6 +149,13 @@ export function useEntryAction() {
       if (action === 'delete') queryClient.removeQueries({ queryKey: contentKeys.entry(id) });
       invalidate(entry ?? undefined);
     },
+  });
+}
+
+/** A one-hour link that shows the entry's latest saved content on the public site. */
+export function usePreviewLink() {
+  return useMutation({
+    mutationFn: (id: string) => apiSend('POST', `/entries/${id}/preview`, {}, previewLinkSchema),
   });
 }
 

@@ -164,3 +164,6 @@ test-results/
 blob-report/
 .vite/
 .DS_Store
+
+# Local Redis/Valkey snapshots
+dump.rdb

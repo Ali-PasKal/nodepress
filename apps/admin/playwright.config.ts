@@ -3,8 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { E2E_MAIL_DIR, E2E_MEDIA_DIR, E2E_SETUP_TOKEN } from './e2e/constants';
 
 /**
- * End-to-end tests run the production admin build (vite preview) against a real API process and a
- * fresh PostgreSQL database. A "setup" project completes the installation wizard once; the viewport
+ * End-to-end tests run the production admin build (vite preview) against a real API process, the
+ * public site runtime and a fresh PostgreSQL database. The preview server proxies /api and /uploads to
+ * the API and every other path outside /admin/ to the site runtime (one origin, as behind nginx). A "setup" project completes the installation wizard once; the viewport
  * projects (desktop, tablet, mobile) then exercise the dashboard.
  */
 const isCI = process.env.CI !== undefined;
@@ -14,6 +15,7 @@ const databaseUrl =
   'postgresql://nexora:nexora_dev_password@127.0.0.1:5432/nexora_e2e';
 const API_PORT = 3199;
 const ADMIN_PORT = 4199;
+const SITE_PORT = 4299;
 
 export default defineConfig({
   testDir: './e2e',
@@ -78,11 +80,32 @@ export default defineConfig({
       },
     },
     {
+      // The public site runtime: renders published content from the API's Delivery endpoints.
+      command: [
+        'pnpm --filter "@nexora/site-runtime..." run build',
+        'pnpm --filter @nexora/site-runtime run start',
+      ].join(' && '),
+      cwd: repoRoot,
+      url: `http://127.0.0.1:${String(SITE_PORT)}/_health`,
+      reuseExistingServer: !isCI,
+      timeout: 120_000,
+      env: {
+        NODE_ENV: 'production',
+        SITE_HOST: '127.0.0.1',
+        SITE_PORT: String(SITE_PORT),
+        DELIVERY_API_URL: `http://127.0.0.1:${String(API_PORT)}`,
+        LOG_LEVEL: 'warn',
+      },
+    },
+    {
       command: `pnpm run build && pnpm exec vite preview --host 127.0.0.1 --port ${String(ADMIN_PORT)} --strictPort`,
       url: `http://127.0.0.1:${String(ADMIN_PORT)}/admin/`,
       reuseExistingServer: !isCI,
       timeout: 120_000,
-      env: { NEXORA_API_URL: `http://127.0.0.1:${String(API_PORT)}` },
+      env: {
+        NEXORA_API_URL: `http://127.0.0.1:${String(API_PORT)}`,
+        NEXORA_SITE_URL: `http://127.0.0.1:${String(SITE_PORT)}`,
+      },
     },
   ],
 });

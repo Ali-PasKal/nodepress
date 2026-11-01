@@ -1,4 +1,5 @@
 import {
+  defaultRoutePrefix,
   FIELD_TYPES,
   type ContentTypeInfo,
   type FieldDefinition,
@@ -66,6 +67,7 @@ interface FieldDraft {
   max: string;
   integer: boolean;
   options: string;
+  public: boolean;
 }
 
 let uid = 0;
@@ -98,6 +100,7 @@ function draftFrom(field: FieldDefinition): FieldDraft {
       field.type === 'select'
         ? field.options.map((option) => `${option.value}: ${option.label}`).join('\n')
         : '',
+    public: field.public,
   };
 }
 
@@ -116,6 +119,7 @@ function newDraft(): FieldDraft {
     max: '',
     integer: false,
     options: '',
+    public: false,
   };
 }
 
@@ -126,6 +130,7 @@ function toDefinition(draft: FieldDraft): Record<string, unknown> {
     type: draft.type,
     required: draft.required,
     description: draft.description,
+    public: draft.public,
   };
   switch (draft.type) {
     case 'text':
@@ -305,6 +310,15 @@ function FieldRow({
           />
           Required
         </Label>
+        <Label className="flex items-center gap-2 text-sm font-normal">
+          <Checkbox
+            checked={draft.public}
+            onChange={(event) => {
+              onChange({ ...draft, public: event.target.checked });
+            }}
+          />
+          Show on the public site
+        </Label>
         <div className="flex gap-1">
           <Button
             type="button"
@@ -345,6 +359,62 @@ function FieldRow({
   );
 }
 
+/** Public address and visibility of a content type or taxonomy. */
+function RouteFields({
+  prefix,
+  onPrefixChange,
+  isPublic,
+  onPublicChange,
+  root,
+  errors,
+  noun,
+}: {
+  prefix: string;
+  onPrefixChange: (value: string) => void;
+  isPublic: boolean;
+  onPublicChange: (value: boolean) => void;
+  root: boolean;
+  errors: Record<string, string>;
+  noun: string;
+}) {
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-md border p-3">
+      <legend className="px-1 text-sm font-medium">Public site</legend>
+      <Label className="flex items-center gap-2 font-normal">
+        <Checkbox
+          checked={isPublic}
+          onChange={(event) => {
+            onPublicChange(event.target.checked);
+          }}
+        />
+        Public (published {noun} appear on the site and in the Delivery API)
+      </Label>
+      {errors.isPublic && <p className="text-xs font-medium text-danger">{errors.isPublic}</p>}
+      {root ? (
+        <p className="text-xs text-muted-foreground">Pages live at the site root (e.g. /about).</p>
+      ) : (
+        <Field
+          label="Address prefix"
+          description={`Lower-case words and hyphens. Addresses look like /${prefix || 'prefix'}/… Published ${noun} keep working at their old address after a change (redirects are created).`}
+          error={errors.routePrefix}
+        >
+          {(control) => (
+            <Input
+              {...control}
+              className="font-mono text-sm"
+              value={prefix}
+              maxLength={64}
+              onChange={(event) => {
+                onPrefixChange(event.target.value);
+              }}
+            />
+          )}
+        </Field>
+      )}
+    </fieldset>
+  );
+}
+
 function issuesOf(error: unknown): Record<string, string> {
   if (!(error instanceof ApiError)) return {};
   return Object.fromEntries(error.issues.map((issue) => [issue.path, issue.message]));
@@ -370,6 +440,10 @@ function ContentTypeForm({
   const [hasExcerpt, setHasExcerpt] = useState(type?.hasExcerpt ?? true);
   const [hasFeaturedImage, setHasFeaturedImage] = useState(type?.hasFeaturedImage ?? true);
   const [taxonomyIds, setTaxonomyIds] = useState<string[]>(type?.taxonomyIds ?? []);
+  const [routePrefix, setRoutePrefix] = useState(type?.routePrefix ?? '');
+  const [prefixTouched, setPrefixTouched] = useState(type !== null);
+  const [isPublic, setIsPublic] = useState(type?.isPublic ?? true);
+  const isRoot = type !== null && type.routePrefix === '';
   const [fields, setFields] = useState<FieldDraft[]>(() => (type?.fields ?? []).map(draftFrom));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -387,6 +461,8 @@ function ContentTypeForm({
       hasFeaturedImage,
       taxonomyIds,
       fields: fields.map(toDefinition) as never,
+      isPublic,
+      ...(isRoot || routePrefix.trim() === '' ? {} : { routePrefix: routePrefix.trim() }),
     };
     save.mutate(type ? { id: type.id, body } : { body: { ...body, key } }, {
       onSuccess: (saved) => {
@@ -429,7 +505,11 @@ function ContentTypeForm({
               placeholder="Product"
               onChange={(event) => {
                 setName(event.target.value);
-                if (!keyTouched) setKey(toKey(event.target.value).slice(0, 32));
+                if (!keyTouched) {
+                  const nextKey = toKey(event.target.value).slice(0, 32);
+                  setKey(nextKey);
+                  if (!prefixTouched) setRoutePrefix(defaultRoutePrefix(nextKey));
+                }
               }}
             />
           )}
@@ -460,6 +540,7 @@ function ContentTypeForm({
               onChange={(event) => {
                 setKeyTouched(true);
                 setKey(event.target.value);
+                if (!prefixTouched) setRoutePrefix(defaultRoutePrefix(event.target.value));
               }}
             />
           )}
@@ -477,6 +558,18 @@ function ContentTypeForm({
           />
         )}
       </Field>
+      <RouteFields
+        prefix={routePrefix}
+        onPrefixChange={(value) => {
+          setPrefixTouched(true);
+          setRoutePrefix(value);
+        }}
+        isPublic={isPublic}
+        onPublicChange={setIsPublic}
+        root={isRoot}
+        errors={errors}
+        noun="entries"
+      />
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-sm font-medium">Features</legend>
         {[
@@ -595,6 +688,9 @@ function TaxonomyForm({
   const [key, setKey] = useState(taxonomy?.key ?? '');
   const [hierarchical, setHierarchical] = useState(taxonomy?.hierarchical ?? false);
   const [contentTypeIds, setContentTypeIds] = useState<string[]>(taxonomy?.contentTypeIds ?? []);
+  const [routePrefix, setRoutePrefix] = useState(taxonomy?.routePrefix ?? '');
+  const [prefixTouched, setPrefixTouched] = useState(taxonomy !== null);
+  const [isPublic, setIsPublic] = useState(taxonomy?.isPublic ?? true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   return (
@@ -603,7 +699,13 @@ function TaxonomyForm({
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault();
-        const body = { name, pluralName, contentTypeIds };
+        const body = {
+          name,
+          pluralName,
+          contentTypeIds,
+          isPublic,
+          ...(routePrefix.trim() === '' ? {} : { routePrefix: routePrefix.trim() }),
+        };
         save.mutate(
           taxonomy ? { id: taxonomy.id, body } : { body: { ...body, key, hierarchical } },
           {
@@ -635,7 +737,11 @@ function TaxonomyForm({
               placeholder="Genre"
               onChange={(event) => {
                 setName(event.target.value);
-                if (!taxonomy) setKey(toKey(event.target.value).slice(0, 32));
+                if (!taxonomy) {
+                  const nextKey = toKey(event.target.value).slice(0, 32);
+                  setKey(nextKey);
+                  if (!prefixTouched) setRoutePrefix(defaultRoutePrefix(nextKey));
+                }
               }}
             />
           )}
@@ -661,6 +767,7 @@ function TaxonomyForm({
               value={key}
               onChange={(event) => {
                 setKey(event.target.value);
+                if (!prefixTouched) setRoutePrefix(defaultRoutePrefix(event.target.value));
               }}
             />
           )}
@@ -676,6 +783,18 @@ function TaxonomyForm({
         />
         Hierarchical (terms can have parents, like categories)
       </Label>
+      <RouteFields
+        prefix={routePrefix}
+        onPrefixChange={(value) => {
+          setPrefixTouched(true);
+          setRoutePrefix(value);
+        }}
+        isPublic={isPublic}
+        onPublicChange={setIsPublic}
+        root={false}
+        errors={errors}
+        noun="term archives"
+      />
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-sm font-medium">Used by</legend>
         {types.map((type) => (
@@ -756,7 +875,9 @@ export function ContentTypesPage() {
                     {type.isSystem && <Badge>Built-in</Badge>}
                     {type.hierarchical && <Badge tone="info">Hierarchical</Badge>}
                   </h2>
-                  <code className="text-xs text-muted-foreground">{type.key}</code>
+                  <code className="text-xs text-muted-foreground">
+                    {type.key} · {type.isPublic ? `/${type.routePrefix}` : 'not public'}
+                  </code>
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button
@@ -836,6 +957,7 @@ export function ContentTypesPage() {
                     {taxonomy.isSystem && <Badge>Built-in</Badge>}
                   </h3>
                   <p className="text-xs text-muted-foreground">
+                    {taxonomy.isPublic ? `/${taxonomy.routePrefix}/… · ` : 'not public · '}
                     {taxonomy.termCount} {taxonomy.termCount === 1 ? 'term' : 'terms'} · used by{' '}
                     {contentTypes
                       .filter((type) => taxonomy.contentTypeIds.includes(type.id))

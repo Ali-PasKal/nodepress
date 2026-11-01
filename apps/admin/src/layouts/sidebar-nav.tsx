@@ -25,11 +25,11 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
             {group.label}
           </p>
           <ul className="flex flex-col gap-0.5">
-            {group.items.map(({ to, label, icon: Icon }) => (
+            {group.items.map(({ to, label, icon: Icon, end }) => (
               <li key={to}>
                 <NavLink
                   to={to}
-                  end={to === '/settings'}
+                  end={end === true}
                   onClick={onNavigate}
                   title={collapsed ? label : undefined}
                   className={({ isActive }) =>

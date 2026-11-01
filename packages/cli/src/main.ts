@@ -14,7 +14,7 @@ ${color.bold('Usage')}
 
 ${color.bold('Commands')}
   dev [--no-infra]        Start PostgreSQL + Valkey (docker compose), apply migrations,
-                          then run the API and admin in watch mode
+                          then run the API, site runtime and admin in watch mode
   build                   Build every package and app for production
   test [--e2e]            Run unit and integration tests (--e2e: Playwright end-to-end tests)
   lint                    Run ESLint and the Prettier format check

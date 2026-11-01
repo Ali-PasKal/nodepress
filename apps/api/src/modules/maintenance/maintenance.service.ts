@@ -21,9 +21,10 @@ export interface CleanupResult {
   readonly rateLimitBuckets: number;
   readonly jobs: number;
   readonly workers: number;
+  readonly previewTokens: number;
 }
 
-/** Hourly purge of expired security records and finished jobs. */
+/** Hourly purge of expired security records (sessions, reset and preview tokens) and finished jobs. */
 @Injectable()
 export class MaintenanceService implements OnModuleInit {
   private readonly logger = new Logger(MaintenanceService.name);
@@ -43,36 +44,41 @@ export class MaintenanceService implements OnModuleInit {
 
   async cleanup(now = new Date()): Promise<CleanupResult> {
     const ago = (ms: number) => new Date(now.getTime() - ms);
-    const [sessions, passwordResetTokens, rateLimitBuckets, jobs, workers] = await Promise.all([
-      this.prisma.session.deleteMany({
-        where: {
-          OR: [
-            { revokedAt: { lt: ago(SESSION_RETENTION_MS) } },
-            { expiresAt: { lt: ago(SESSION_RETENTION_MS) } },
-            { lastSeenAt: { lt: ago(this.config.session.idleTimeoutMs + SESSION_RETENTION_MS) } },
-          ],
-        },
-      }),
-      this.prisma.passwordResetToken.deleteMany({
-        where: { expiresAt: { lt: ago(RESET_TOKEN_RETENTION_MS) } },
-      }),
-      this.prisma.rateLimitBucket.deleteMany({ where: { expiresAt: { lt: now } } }),
-      this.prisma.job.deleteMany({
-        where: {
-          OR: [
-            { status: 'succeeded', finishedAt: { lt: ago(SUCCEEDED_JOB_RETENTION_MS) } },
-            { status: 'dead', finishedAt: { lt: ago(DEAD_JOB_RETENTION_MS) } },
-          ],
-        },
-      }),
-      this.prisma.jobWorker.deleteMany({ where: { lastSeenAt: { lt: ago(WORKER_RETENTION_MS) } } }),
-    ]);
+    const [sessions, passwordResetTokens, rateLimitBuckets, jobs, workers, previewTokens] =
+      await Promise.all([
+        this.prisma.session.deleteMany({
+          where: {
+            OR: [
+              { revokedAt: { lt: ago(SESSION_RETENTION_MS) } },
+              { expiresAt: { lt: ago(SESSION_RETENTION_MS) } },
+              { lastSeenAt: { lt: ago(this.config.session.idleTimeoutMs + SESSION_RETENTION_MS) } },
+            ],
+          },
+        }),
+        this.prisma.passwordResetToken.deleteMany({
+          where: { expiresAt: { lt: ago(RESET_TOKEN_RETENTION_MS) } },
+        }),
+        this.prisma.rateLimitBucket.deleteMany({ where: { expiresAt: { lt: now } } }),
+        this.prisma.job.deleteMany({
+          where: {
+            OR: [
+              { status: 'succeeded', finishedAt: { lt: ago(SUCCEEDED_JOB_RETENTION_MS) } },
+              { status: 'dead', finishedAt: { lt: ago(DEAD_JOB_RETENTION_MS) } },
+            ],
+          },
+        }),
+        this.prisma.jobWorker.deleteMany({
+          where: { lastSeenAt: { lt: ago(WORKER_RETENTION_MS) } },
+        }),
+        this.prisma.previewToken.deleteMany({ where: { expiresAt: { lt: now } } }),
+      ]);
     const result: CleanupResult = {
       sessions: sessions.count,
       passwordResetTokens: passwordResetTokens.count,
       rateLimitBuckets: rateLimitBuckets.count,
       jobs: jobs.count,
       workers: workers.count,
+      previewTokens: previewTokens.count,
     };
     this.logger.log({ deleted: result }, 'Maintenance cleanup finished');
     return result;
