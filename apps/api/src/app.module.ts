@@ -14,6 +14,7 @@ import { SystemModule } from './modules/system/system.module.js';
 import { AccountModule } from './modules/account/account.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
+import { ContentModule } from './modules/content/content.module.js';
 import { JobsModule } from './modules/jobs/jobs.module.js';
 import { MailModule } from './modules/mail/mail.module.js';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module.js';
@@ -57,6 +58,7 @@ export class AppModule {
         RolesModule,
         SettingsModule,
         MaintenanceModule,
+        ContentModule,
       ],
       providers: [
         { provide: APP_FILTER, useClass: GlobalExceptionFilter },

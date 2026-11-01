@@ -44,7 +44,7 @@ async function jobRows(name: string) {
       (
         await db.query(
           `SELECT id, status, attempts, last_error, dedupe_key, run_at, locked_by
-             FROM jobs WHERE name = $1 ORDER BY created_at`,
+             FROM jobs WHERE name = $1 ORDER BY created_at, payload->>'n'`,
           [name],
         )
       ).rows as {

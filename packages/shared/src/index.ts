@@ -13,3 +13,6 @@ export * from './contracts/setup.js';
 export * from './contracts/system.js';
 export * from './contracts/users.js';
 export * from './contracts/jobs.js';
+export * from './contracts/content.js';
+export * from './contracts/fields.js';
+export * from './contracts/rich-text.js';
