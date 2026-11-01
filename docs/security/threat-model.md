@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | Living document. Revised at the start of every milestone. |
-| Last reviewed | Milestone 3 (content, media, background jobs) |
+| Last reviewed | Milestone 4 (public site, themes, Delivery API) |
 | Scope | All components in [the architecture overview](../architecture/overview.md) |
 
 NEXORA does **not** claim to be invulnerable or "more secure than WordPress". It aims for a documented
@@ -29,7 +29,8 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
  [Internet] ──(1)── [Edge: TLS proxy / nginx] ──(2)── [api]  ──(4)── [PostgreSQL]
                                 │                       │ └──(5)── [Valkey/Redis]
                                 │                       └───(6)── [Object storage]   (M3)
-                                └──(3)── [admin static assets]
+                                ├──(3)── [admin static assets]
+                                └──(9)── [site runtime] ──(10)── [api: public Delivery endpoints only]   (M4)
  [Plugin code] ──(7)── [extension runtime]  (M6)        [Outbound HTTP] ──(8)── [Internet / private net]  (M3+)
 ```
 
@@ -41,6 +42,8 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 6. **API → object storage** (M3). Server-generated keys only; private objects are served through authorised endpoints or short-lived signed URLs.
 7. **Core → plugins** (M6). A plugin manifest is metadata, not a security boundary (see §5.4).
 8. **API → outbound network** (M3+: media import, WordPress import, webhooks, analytics). Guarded against SSRF.
+9. **Edge → site runtime** (M4). Renders public pages; holds no secrets and has no database access, so it cannot read drafts even if compromised.
+10. **Site runtime → API** (M4). Only the public, read-only Delivery endpoints; responses are validated against the shared contracts before rendering.
 
 ## 3. Threat actors and scenarios
 
@@ -49,7 +52,9 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 - **Mitigations:**
   - Implemented (M1): request body size limits (413); per-handler timeouts (503) and transport timeouts; strict security headers with CSP `default-src 'none'` on API responses; uniform error envelope that never reflects input or leaks stack traces; the unauthenticated readiness endpoint coalesces probes into at most one dependency check per second; `Cache-Control: no-store` by default; production disables API docs by default.
   - Implemented (M2): rate limits on sign-in (20 per IP per 5 min; 5 failures per account per 15 min, then locked for the window even with the right password), password reset (5 per IP per 15 min; 3 per account per hour, silently) and setup (10 per IP per 15 min), backed by Redis when available and PostgreSQL otherwise; identical responses and comparable timing (dummy Argon2 verification) for unknown accounts, wrong passwords and suspended accounts; password reset responds identically whether or not the account exists and sends mail in the background; a one-time setup token prevents strangers from claiming a fresh install.
-  - Planned (M4): a single Delivery API choke point that only ever returns published content unless a valid, expiring, signed preview token is supplied; cache keys that never mix draft and published content.
+  - Implemented (M4): the Delivery API is the only public read path and every query goes through one "publicly visible" predicate (published, not trashed, publication time reached, public content type) plus a path-based ancestor check for hierarchical entries; tested per status, scheduling, trash, non-public types and unpublished ancestors, with a mutation check (removing any clause makes a test fail). Custom fields are only delivered when marked public (off by default); authors are exposed by display name only.
+  - Implemented (M4): preview links are 256-bit random tokens stored as SHA-256, valid for one hour, invalid once the entry is trashed or the creator suspended; responses are `no-store`, `noindex, nofollow` and `Referrer-Policy: no-referrer`, and nginx keeps `/_preview/` out of its access log.
+  - Implemented (M4): public pages are served with `default-src 'none'; style-src 'self'; img-src 'self' data: https:` and no script source at all (structured data uses non-executable JSON-LD blocks, escaped against `</script>`); React escapes all text; sitemap and RSS are XML-escaped; redirect targets are site paths or credential-free http(s) URLs.
   - Planned (M7): form spam mitigation (honeypot + rate limits + optional challenge), server-side validation.
 
 ### 3.2 Authenticated content editors (Author, Contributor, Editor)
@@ -58,7 +63,7 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
   - Implemented (M2): capability-based authorisation on every route via a global, fail-closed guard (a route without a declared policy is refused, and a test inventories every route); privilege-escalation rules (no granting unheld capabilities, no managing more privileged users, no self role/status changes, no editing one's own role, last active Super Administrator protected); role and status changes revoke the target's sessions; append-only audit log.
   - Implemented (M3): one content policy for own vs. others' entries, live content and publishing rights, tested for every built-in role (including a mutation check that the tests catch a weakened rule); entries a user may not see return 404.
   - Implemented (M3): rich text is stored as ProseMirror JSON validated against an allowlist (no HTML, no unknown nodes or marks, link targets limited to http(s)/mailto/tel/same-site, images limited to `/uploads/` or http(s)); nesting depth is checked before parsing; the admin renders stored content as React elements, re-checking URLs.
-  - Planned (M4/M5): renderers for the public site that escape text and emit only the allowlisted constructs; HTML Embed in a sandboxed `iframe` without `allow-same-origin`; strict CSP on public pages.
+  - Implemented (M4): the public renderer (theme SDK) emits only the allowlisted rich-text constructs as React elements and re-checks link and image URLs; the public pages' CSP allows no scripts, so injected markup cannot execute. Planned (M5): HTML Embed in a sandboxed `iframe` without `allow-same-origin`.
   - Implemented (M1): admin CSP has `script-src 'self'` with no inline scripts (enforced by an E2E test that fails on any CSP violation).
 
 ### 3.3 Administrators
@@ -131,7 +136,11 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 | SMTP with TLS and certificate verification required in production | Implemented (M3) | `env.schema.ts`, `mailer.service.ts`; `env.schema.test.ts`, `mail.test.ts` |
 | Expiry-based purging of sessions, tokens, rate-limit buckets, jobs, trash | Implemented (M3) | `maintenance.service.ts`, `entries.service.ts`; `maintenance.test.ts`, `entries.test.ts` |
 | SSRF guard (outbound fetches) | Planned (with the first feature that fetches URLs: M6/M7) | — |
-| Delivery API draft isolation, signed previews | Planned (M4) | — |
+| Delivery API draft isolation (one visibility predicate + ancestor check), public-field opt-in | Implemented (M4) | `delivery/public-content.ts`, `delivery.service.ts`; `delivery.test.ts` |
+| Hashed, expiring preview tokens; private preview responses | Implemented (M4) | `entries.service.ts` (`createPreview`), `delivery.service.ts`, site runtime `app.ts`; `delivery.test.ts`, `app.test.ts` |
+| Public pages: CSP without scripts or inline styles, escaped head/JSON-LD/XML, ETags, 503 on API outage | Implemented (M4) | `apps/site-runtime/src/{app,html,seo,xml,themes}.ts`; `app.test.ts`, E2E `public-site.spec.ts` |
+| Reserved paths and route prefix collisions; redirect source/target validation; loop detection | Implemented (M4) | `content-model.service.ts`, `entries.service.ts`, `redirects.service.ts`, shared `redirects.ts`; `routes-redirects.test.ts` |
+| Theme settings validated against the theme manifest (CSS variable values re-validated by the runtime) | Implemented (M4) | shared `themes.ts`, `site-settings.service.ts`, runtime `themes.ts`; `appearance.test.ts`, `app.test.ts` |
 | Plugin isolation | Planned (M6) | — |
 
 ## 5. Design decisions with security impact
@@ -139,8 +148,9 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 ### 5.1 Same-origin admin by default
 Admin (`/admin/`), API (`/api/`) and the public site share one origin, which keeps cookies `SameSite=Strict`
 and removes CORS entirely. The trade-off (risk **R-03**): script running on the public site would run in the
-admin's origin. This is mitigated by never storing or executing user-supplied script, sandboxing HTML
-embeds in iframes, and strict CSP on public pages. A separate admin origin is supported (via
+admin's origin. Since M4 the public pages' CSP contains no script source at all (`default-src 'none'`), so even
+injected markup cannot execute script; content is stored as allowlisted JSON (never HTML), themes are
+first-party code, and HTML embeds (M5) will be sandboxed in iframes. A separate admin origin is supported (via
 `CORS_ALLOWED_ORIGINS`) and recommended for high-value sites.
 
 ### 5.2 Readiness is public, but minimal and rate-coalesced
@@ -179,6 +189,10 @@ administrator approval). The UI and documentation must never present trusted plu
 | R-16 | Media is served from the admin's origin by default (`/uploads`) | Mitigated by type allowlist, re-encoding, `nosniff` and `default-src 'none'; sandbox`; a separate media origin via `MEDIA_PUBLIC_BASE_URL` is supported |
 | R-17 | Media files are public by URL (unguessable keys, but no access control), including files only referenced by drafts | Accepted (common CMS behaviour); private media is a possible later feature |
 | R-18 | Uploads are buffered in memory (up to `MEDIA_MAX_UPLOAD_MB` each) | Mitigated by one file per request, a per-user rate limit (60 per 10 min) and the size limit; streaming uploads are a later improvement |
+| R-19 | Public pages are rendered per request (several indexed queries each) and the Delivery API has no application-level rate limit | Open; bounded queries, request timeouts and body limits apply; edge rate limiting and an HTML cache are planned for M7 (performance) |
+| R-20 | A preview link is a bearer secret: anyone holding it can read that draft for up to an hour; links cannot be revoked one by one | Accepted; short lifetime, hashed at rest, no referrer, no caching, noindex; trashing the entry or suspending the creator invalidates it |
+| R-21 | Users with `seo.manage` (or `appearance.manage` for menus) can send visitors to external http(s) sites | Accepted (authorised users only, as in other CMSs); `javascript:`, `data:`, protocol-relative and credential-bearing URLs are rejected |
+| R-22 | Root pages created before M4 whose slug equals a route prefix (e.g. a page called "blog") are shadowed by that section | Accepted; documented in the M4 notes; new pages and prefixes are validated so this cannot be created anymore |
 
 ## 7. Security checklist (per change)
 

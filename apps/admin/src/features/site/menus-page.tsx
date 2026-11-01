@@ -269,28 +269,10 @@ function AddTerm({ onAdd }: { onAdd: (item: DraftItem) => void }) {
 function AddLink({ onAdd }: { onAdd: (item: DraftItem) => void }) {
   const [label, setLabel] = useState('');
   const [url, setUrl] = useState('');
+  const ready = label.trim() !== '' && url.trim() !== '';
+  // Not a <form>: this panel sits inside the menu editor's form, and forms cannot be nested.
   return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (label.trim() === '' || url.trim() === '') return;
-        onAdd({
-          key: nextKey(),
-          depth: 0,
-          label: label.trim(),
-          kind: 'url',
-          entryId: null,
-          termId: null,
-          url: url.trim(),
-          openInNewTab: false,
-          targetTitle: url.trim(),
-          state: 'available',
-        });
-        setLabel('');
-        setUrl('');
-      }}
-    >
+    <div className="flex flex-col gap-2">
       <Field label="Link text">
         {(control) => (
           <Input
@@ -317,16 +299,33 @@ function AddLink({ onAdd }: { onAdd: (item: DraftItem) => void }) {
       </Field>
       <div>
         <Button
-          type="submit"
+          type="button"
           size="sm"
           variant="outline"
-          disabled={label.trim() === '' || url.trim() === ''}
+          disabled={!ready}
+          onClick={() => {
+            if (!ready) return;
+            onAdd({
+              key: nextKey(),
+              depth: 0,
+              label: label.trim(),
+              kind: 'url',
+              entryId: null,
+              termId: null,
+              url: url.trim(),
+              openInNewTab: false,
+              targetTitle: url.trim(),
+              state: 'available',
+            });
+            setLabel('');
+            setUrl('');
+          }}
         >
           <Plus aria-hidden="true" />
           Add link
         </Button>
       </div>
-    </form>
+    </div>
   );
 }
 

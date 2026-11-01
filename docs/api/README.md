@@ -96,6 +96,7 @@ When `OPENAPI_ENABLED` is on (the default outside production), the running API s
 | GET | `/api/v1/entries/{id}/revisions` | as entry | Revisions, newest first |
 | GET | `/api/v1/entries/{id}/revisions/{revisionId}` | as entry | A revision's full content |
 | POST | `/api/v1/entries/{id}/revisions/{revisionId}/restore` | per entry | Restore a revision (saved as a new revision); requires `version` |
+| POST | `/api/v1/entries/{id}/preview` | as entry (not trashed) | A one-hour preview link to the public site (`{ url, expiresAt }`); only the token's hash is stored |
 | GET | `/api/v1/media` | `media.upload`, `media.manage` or `content.read` | Media library (`search`, `kind`, `mine`, paging) |
 | GET | `/api/v1/media/limits` | `media.upload` or `media.manage` | Upload size limit and accepted types |
 | POST | `/api/v1/media` | `media.upload` | Upload (`multipart/form-data`: `file`, optional `title`, `altText`) |
@@ -106,6 +107,20 @@ When `OPENAPI_ENABLED` is on (the default outside production), the running API s
 | POST | `/api/v1/jobs/{id}/retry` | `jobs.manage` | Retry a dead job |
 | DELETE | `/api/v1/jobs/{id}` | `jobs.manage` | Discard a dead job |
 | GET / HEAD | `/uploads/{key}` | public | Stored media files (outside `/api`; immutable caching, byte ranges, `nosniff`, sandboxing CSP) |
+| GET / PUT | `/api/v1/settings/general` | `appearance.manage` | Site name, tagline, language, home page (latest posts or a page), posts per page |
+| GET / PUT | `/api/v1/settings/seo` | `seo.manage` | Title template, default description and social image, search engine visibility |
+| GET | `/api/v1/appearance/themes` | `appearance.manage` | Installed themes (manifests) and the active theme |
+| PUT | `/api/v1/appearance/theme` | `appearance.manage` | Activate a theme |
+| GET / PUT | `/api/v1/appearance/themes/{key}/settings` | `appearance.manage` | A theme's settings, validated against its manifest (unknown keys rejected, missing keys take defaults) |
+| GET / POST | `/api/v1/menus` | `appearance.manage` | Menus with the active theme's locations; create a menu |
+| GET / PUT / DELETE | `/api/v1/menus/{id}` | `appearance.manage` | A menu with its items and their targets; replace name, location and the whole item tree; delete |
+| GET / POST | `/api/v1/redirects` | `seo.manage` | Redirects (`search`, `source`, paging); create a manual redirect |
+| PATCH / DELETE | `/api/v1/redirects/{id}` | `seo.manage` | Update (becomes manual); delete |
+| GET | `/api/v1/delivery/site` | public | Site identity, SEO defaults, resolved theme settings and menus |
+| GET | `/api/v1/delivery/page?path=&page=` | public | Resolve a public path: `home`, `entry`, `archive`, `redirect` or `not_found` (always 200; the route says which) |
+| GET | `/api/v1/delivery/preview/{token}` | public + token | The entry a valid preview token names, in its latest saved state (`no-store`; 404 when invalid or expired) |
+| GET | `/api/v1/delivery/sitemap` | public | Public URLs for `sitemap.xml` (max. 50 000) |
+| GET | `/api/v1/delivery/feed` | public | The 20 latest posts for the RSS feed |
 
 Privilege-escalation rules apply on top of capabilities: nobody can grant capabilities they do not hold, manage a user
 who holds capabilities they lack, change their own role or status, edit their own role, or remove the last active
@@ -116,3 +131,11 @@ need `content.create`, others' need `content.edit_others`; published or schedule
 `content.publish` (so contributors cannot change live content); publishing and scheduling need `content.publish`;
 trash, restore and permanent deletion need `content.delete` on top of the edit rules. Users who may not see an entry
 get `404`, not `403`. The `permissions` object in entry responses reports what the caller may do.
+
+**Delivery API.** The public endpoints return only publicly visible content: status `published`, not in the trash,
+publication time reached, a public content type, and (for hierarchical types) every ancestor visible. Custom fields
+appear only when the field is marked public. URLs follow the route prefixes: posts at `/blog/{slug}`, pages at the
+root (`/about/team`), custom types at `/{prefix}/{path}`, term archives at `/{taxonomy-prefix}/{slug}`, content type
+archives at `/{prefix}`, listings paginated with `?page=N`. Paths are sent decoded (`/درباره-ما`); redirect
+locations come back percent-encoded. When a published entry's path, a term's slug or a route prefix changes, the
+API records permanent redirects from the old addresses (chains are flattened).

@@ -42,9 +42,9 @@
 
 | Process | Responsibility | Status |
 |---|---|---|
-| `apps/api` | Authenticated management API, public Delivery API, OpenAPI, migrations, `/uploads` file serving | **M1–M3** (identity M2; content, media, jobs M3) |
-| `apps/admin` | Admin dashboard and (from M5) the visual editor, served as static assets under `/admin/` | **M1–M3** (content, media, terms, content types, jobs in M3) |
-| `apps/site-runtime` | Server-side rendering of published pages using themes + document model | M4 |
+| `apps/api` | Authenticated management API, public Delivery API, OpenAPI, migrations, `/uploads` file serving | **M1–M4** (identity M2; content, media, jobs M3; delivery, appearance, menus, redirects M4) |
+| `apps/admin` | Admin dashboard and (from M5) the visual editor, served as static assets under `/admin/` | **M1–M4** (content, media, terms, content types, jobs in M3; dashboard, appearance, menus, SEO, redirects in M4) |
+| `apps/site-runtime` | Public site: server-side rendering (React) of published content with the active theme, using only the public Delivery API — no database access, no credentials, no client-side JavaScript | **M4** |
 | worker (`apps/api/dist/worker.js`) | Background jobs and recurring tasks from the PostgreSQL queue; embedded in the API by default (`JOBS_WORKER`) | **M3** |
 
 **Single origin by default.** Admin (`/admin/`), API (`/api/`) and the public site (`/`) share one origin in the
@@ -59,7 +59,7 @@ model, risk R-03.
 apps/
   api/            NestJS modular monolith (management API, delivery API, worker entrypoint later)    [M1]
   admin/          React admin SPA + visual editor shell                                              [M1]
-  site-runtime/   Public SSR renderer                                                                [M4]
+  site-runtime/   Public SSR renderer (Express + React, Delivery API client, SEO head, feeds)      [M4]
 packages/
   shared/         Runtime-validated API contracts (Zod) shared by api and clients                    [M1]
   ui/             Design system (Tailwind v4 tokens + shadcn/ui-style components)                    [M1]
@@ -68,9 +68,10 @@ packages/
   editor/         Editor state, drag-and-drop, widget controls (React)                               [M5]
   widgets/        First-party widget definitions + renderers                                         [M5]
   plugin-sdk/     Plugin manifest schema, types, test harness                                        [M6]
-  theme-sdk/      Theme manifest schema, template types                                              [M4]
-plugins/          First-party plugins (seo, forms, redirects, analytics, backup, sitemap, …)         [M6–M7]
-themes/           nexora-starter, nexora-business, nexora-editorial                                  [M4, M7]
+  theme-sdk/      Theme types, safe rich-text and responsive image components, helpers            [M4]
+  theme-starter/  Starter theme: manifest (plain data, read by the API) + React templates + CSS    [M4]
+plugins/          First-party plugins (forms, analytics, backup, …)                                  [M6–M7]
+themes/           Further themes (business, editorial)                                               [M7]
 infrastructure/
   docker/         Dockerfiles and runtime configs                                                    [M1]
 docs/             architecture, security, development, api, status                                   [M1]
@@ -121,10 +122,9 @@ Rules:
 | `content` | content types and custom fields, taxonomies and terms, entries (posts/pages/custom), status workflow, scheduling, trash, revisions, content policy | **M3** |
 | `media` | uploads (content sniffing, re-encoding), variants job, usage counts, storage drivers (local, S3), `/uploads` serving | **M3** |
 | `jobs`, `maintenance`, `mail` | PostgreSQL queue, worker, recurring tasks, cleanup, SMTP | **M3** |
-| `navigation` | menus and items | M4 |
-| `themes` | theme registry, settings, templates, template parts | M4 |
-| `delivery` | public read-only API consumed by site-runtime; enforces "published only" | M4 |
-| `seo` | metadata, sitemaps, robots, redirects, structured data | M4/M6 |
+| `appearance` | site settings (identity, language, home page, reading), SEO settings, theme registry and validated theme settings, menus and theme locations | **M4** |
+| `redirects` | manual redirects; automatic, flattened 301s when published URLs move | **M4** |
+| `delivery` | public read-only API consumed by site-runtime (pages, sitemap, feed, previews); one "publicly visible" predicate | **M4** |
 | `builder` | editor documents, global widgets, reusable sections | M5 |
 | `extensions` | plugin registry, lifecycle, capability grants, hook bus | M6 |
 | `forms` | form definitions, submissions, retention, export | M7 |
@@ -220,6 +220,19 @@ authorisation tests — not a schema rewrite.
 
 ## 7. Content rendering and the visual builder (M4–M5)
 
+**M4 (implemented).** The site runtime resolves each request path through the Delivery API
+(`GET /api/v1/delivery/page?path=…`), which returns the site data (identity, SEO defaults, validated theme
+settings, menus) and a route: home (latest posts or a static page), entry, archive (content type or term),
+redirect or not found. Only publicly visible content is returned: status `published`, not trashed, publication
+time reached, public content type, and every ancestor published. Rich text is rendered from the stored
+ProseMirror JSON as React elements by the theme SDK (no HTML strings); the runtime owns the document head
+(titles, description, canonical, Open Graph, JSON-LD, robots), escapes everything it writes, and sends a CSP
+without any script source. Theme settings reach the page as CSS custom properties in a stylesheet whose URL
+carries the (re-validated) values, so pages contain no inline styles or scripts. Pages are rendered per request
+with ETags (`Cache-Control: max-age=0, must-revalidate`); an HTML cache is a later performance task.
+
+**M5 (planned):**
+
 - Pages built in the editor are stored as a **typed, versioned JSON document** (tree of sections, containers,
   widgets with stable ids, responsive overrides). There is no stored HTML or JavaScript in the model.
 - The same Zod schema validates documents in the browser and on the server. Each document carries a
@@ -235,9 +248,12 @@ authorisation tests — not a schema rewrite.
 
 ## 8. Themes and plugins (M4, M6)
 
-**Themes** are declarative packages: manifest + templates expressed in the document model + design tokens +
-static assets. A theme cannot run server-side code. Settings are validated against the manifest's schema and
-migrated between theme versions by declarative mapping.
+**Themes (M4).** A theme is a code package shipped with the application: a manifest (plain data — settings with
+types and defaults, menu locations) and React templates rendered by the site runtime. The API imports only the
+manifest, to validate settings (`buildThemeSettingsSchema`) and to resolve stored values leniently
+(`resolveThemeSettings`: stale values fall back to defaults). Because themes are code, installing third-party
+themes is part of the extension trust model (M6) and not offered in M4; when the M5 document model exists,
+templates can become declarative data so that untrusted themes need no code at all.
 
 **Plugins** — the manifest is metadata, not a security boundary. Three trust tiers:
 

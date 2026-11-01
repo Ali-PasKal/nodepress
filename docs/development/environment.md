@@ -75,6 +75,23 @@ The API refuses to start if:
 In every environment the API also refuses incomplete settings: `MAIL_TRANSPORT=smtp` without `SMTP_HOST`,
 `MEDIA_STORAGE=s3` without `S3_BUCKET`, and only one half of a credential pair.
 
+## Site runtime (`apps/site-runtime`)
+
+The public site process validates its environment at startup (`apps/site-runtime/src/config.ts`). It holds no
+secrets and needs no database access: everything it shows comes from the API's public Delivery endpoints.
+
+| Variable | Default | Description |
+|---|---|---|
+| `NODE_ENV` | `development` | `development`, `test` or `production` |
+| `SITE_HOST` | `127.0.0.1` (`0.0.0.0` in the container image) | Listen address |
+| `SITE_PORT` | `4321` | Listen port |
+| `DELIVERY_API_URL` | `http://127.0.0.1:3000` | Base URL of the NEXORA API (http or https). Only `/api/v1/delivery/*` is used |
+| `SITE_API_TIMEOUT_MS` | `5000` | Timeout for each Delivery API request; when the API is slow or down the site answers 503 with `Retry-After` |
+| `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
+
+The site must be served from the same origin as the API's `/uploads` (as the Compose nginx and the Vite
+dev/preview proxies do), because media URLs are site-relative unless `MEDIA_PUBLIC_BASE_URL` is set.
+
 ## Docker Compose
 
 | Variable | Default | Used by |
@@ -82,7 +99,7 @@ In every environment the API also refuses incomplete settings: `MAIL_TRANSPORT=s
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `nexora` / *(required)* / `nexora` | `postgres`, and the `migrate`/`api` connection strings |
 | `POSTGRES_PORT` | `5432` | Host port (bound to 127.0.0.1) |
 | `VALKEY_PORT` | `6379` | Host port (bound to 127.0.0.1) |
-| `APP_PORT` | `8080` | Host port of the admin/edge container in the `app` profile |
+| `APP_PORT` | `8080` | Host port of the edge (nginx) container in the `app` profile: the public site at `/`, the admin at `/admin/` |
 | `MEDIA_MAX_UPLOAD_MB` | `25` | Passed to the `api` and `worker` services |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `MAIL_FROM` | unset (mail disabled) | Passed to the `api` and `worker` services |
 
@@ -99,4 +116,5 @@ In every environment the API also refuses incomplete settings: `MAIL_TRANSPORT=s
 
 | Variable | Default | Description |
 |---|---|---|
-| `NEXORA_API_URL` | `http://127.0.0.1:3000` | API that the Vite dev/preview server proxies `/api` to |
+| `NEXORA_API_URL` | `http://127.0.0.1:3000` | API that the Vite dev/preview server proxies `/api` and `/uploads` to |
+| `NEXORA_SITE_URL` | `http://127.0.0.1:4321` | Site runtime that the Vite dev/preview server proxies every other path outside `/admin/` to |

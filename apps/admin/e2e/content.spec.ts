@@ -51,7 +51,7 @@ test.describe('Content', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'New post' })).toBeVisible();
 
     const title = `Launch day ${suffix(page)}`;
-    await page.getByLabel('Title').fill(title);
+    await page.getByLabel('Title', { exact: true }).fill(title);
     await expect(page.getByLabel('Slug')).toHaveValue(`launch-day-${suffix(page)}`);
     await typeInEditor(page, 'Post content', 'We are live. ');
     await page.getByRole('button', { name: 'Bold' }).click();
@@ -99,18 +99,18 @@ test.describe('Content', () => {
       title: `Original title ${suffix(page)}`,
     })) as { id: string };
     await page.goto(`/admin/content/post/${created.id}`);
-    await page.getByLabel('Title').fill(`Changed title ${suffix(page)}`);
+    await page.getByLabel('Title', { exact: true }).fill(`Changed title ${suffix(page)}`);
     await page.getByRole('button', { name: 'Save draft' }).click();
     await expect(page.getByText('Post saved.')).toBeVisible();
 
     // Leaving with unsaved changes asks first.
-    await page.getByLabel('Title').fill(`Unsaved ${suffix(page)}`);
+    await page.getByLabel('Title', { exact: true }).fill(`Unsaved ${suffix(page)}`);
     await page.getByRole('link', { name: 'All posts' }).click();
     const leave = page.getByRole('alertdialog', { name: 'Leave without saving?' });
     await expect(leave).toBeVisible();
     await leave.getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.getByLabel('Title')).toHaveValue(`Unsaved ${suffix(page)}`);
-    await page.getByLabel('Title').fill(`Changed title ${suffix(page)}`);
+    await expect(page.getByLabel('Title', { exact: true })).toHaveValue(`Unsaved ${suffix(page)}`);
+    await page.getByLabel('Title', { exact: true }).fill(`Changed title ${suffix(page)}`);
 
     await page.getByRole('button', { name: 'Revisions' }).click();
     const dialog = page.getByRole('dialog', { name: 'Revisions' });
@@ -121,7 +121,9 @@ test.describe('Content', () => {
     await dialog.getByRole('button', { name: 'Restore this version' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Restore' }).click();
     await expect(page.getByText('Revision restored.')).toBeVisible();
-    await expect(page.getByLabel('Title')).toHaveValue(`Original title ${suffix(page)}`);
+    await expect(page.getByLabel('Title', { exact: true })).toHaveValue(
+      `Original title ${suffix(page)}`,
+    );
   });
 
   test('a concurrent edit is detected instead of silently overwritten', async ({ page }) => {
@@ -131,17 +133,21 @@ test.describe('Content', () => {
       title: `Shared draft ${suffix(page)}`,
     })) as { id: string; version: number };
     await page.goto(`/admin/content/post/${created.id}`);
-    await expect(page.getByLabel('Title')).toHaveValue(`Shared draft ${suffix(page)}`);
+    await expect(page.getByLabel('Title', { exact: true })).toHaveValue(
+      `Shared draft ${suffix(page)}`,
+    );
     // Someone else saves first.
     await apiAsUser(page, 'PATCH', `/entries/${created.id}`, {
       version: created.version,
       title: `Their edit ${suffix(page)}`,
     });
-    await page.getByLabel('Title').fill(`My edit ${suffix(page)}`);
+    await page.getByLabel('Title', { exact: true }).fill(`My edit ${suffix(page)}`);
     await page.getByRole('button', { name: 'Save draft' }).click();
     await expect(page.getByText('Someone else changed this post')).toBeVisible();
     await page.getByRole('button', { name: 'Load latest version' }).click();
-    await expect(page.getByLabel('Title')).toHaveValue(`Their edit ${suffix(page)}`);
+    await expect(page.getByLabel('Title', { exact: true })).toHaveValue(
+      `Their edit ${suffix(page)}`,
+    );
   });
 
   test('a contributor submits for review and an editor publishes from the list', async ({
@@ -170,7 +176,7 @@ test.describe('Content', () => {
     await signIn(contributor, email, 'a contributor passphrase');
     await contributor.goto('/admin/content/post/new');
     const title = `For review ${suffix(page)}`;
-    await contributor.getByLabel('Title').fill(title);
+    await contributor.getByLabel('Title', { exact: true }).fill(title);
     await expect(contributor.getByRole('button', { name: 'Publish' })).toHaveCount(0);
     await contributor.getByRole('button', { name: 'Submit for review' }).click();
     await expect(contributor.getByText('Pending review').first()).toBeVisible();
@@ -197,7 +203,7 @@ test.describe('Content', () => {
     };
     await navigate(page, 'Pages');
     await page.getByRole('link', { name: 'New page' }).first().click();
-    await page.getByLabel('Title').fill('Team');
+    await page.getByLabel('Title', { exact: true }).fill('Team');
     await page.getByLabel('Parent page').selectOption({ label: `About ${suffix(page)}` });
     await page.getByRole('button', { name: 'Save draft' }).click();
     await expect(page.getByText('Page saved.')).toBeVisible();
@@ -235,7 +241,7 @@ test.describe('Content', () => {
     await expect(page.getByTestId(`content-type-${key}`)).toContainText('1 custom field');
 
     await page.goto(`/admin/content/${key}/new`);
-    await page.getByLabel('Title').fill('Widget');
+    await page.getByLabel('Title', { exact: true }).fill('Widget');
     await page.getByRole('button', { name: 'Save draft' }).click();
     await expect(page.getByText(/Price is required|Enter a number/)).toBeVisible();
     await page.getByLabel('Price *').fill('19.5');

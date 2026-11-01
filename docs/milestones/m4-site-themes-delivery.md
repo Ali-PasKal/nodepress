@@ -32,8 +32,9 @@ visitors: `/` in the container topology returns 404 and there is no read API for
 - **Admin**: Appearance (theme, theme settings, site identity and reading settings), Menus, SEO (settings and
   redirects), SEO panel and View/Preview buttons in the editor, route prefix and visibility for content types, a
   dashboard home page.
-- **Security**: strict CSP on public pages (nonces, no inline script execution), safe output encoding (React, XML
-  escaping, JSON-LD escaping), no-store previews, caching headers with ETags.
+- **Security**: strict CSP on public pages (no scripts and no inline styles at all; theme settings arrive as a
+  stylesheet), safe output encoding (React, XML escaping, JSON-LD escaping), no-store previews, caching headers
+  with ETags.
 
 **Out of scope (later milestones)**
 - The visual page builder and widget documents (M5); pages use the rich-text body until then.
@@ -49,7 +50,9 @@ visitors: `/` in the container topology returns 404 and there is no read API for
 | Themes are code packages selected by key; settings are data validated against the theme's declared schema | Uploading theme code is an extension-trust problem (M6); settings are safe to store and edit |
 | Route prefixes per content type and taxonomy, pages at the root | Predictable URLs without collisions; the API rejects root pages whose first segment is a reserved prefix |
 | Preview tokens stored hashed in the database (1 hour) | Same model as reset tokens: revocable, works across instances, no new long-lived secret |
-| No client-side JavaScript in the starter theme | Fast pages, smallest attack surface, `script-src` limited to a nonce for JSON-LD |
+| No client-side JavaScript in the starter theme | Fast pages, smallest attack surface: the CSP has no script source at all (JSON-LD is a non-executable data block), and without nonces the HTML is deterministic, so ETags and 304 responses work |
+| Custom fields are public only when marked so (off by default) | Data minimisation: fields added for internal use must not appear in a public API by accident |
+| Route prefix changes are allowed and create redirects for every published entry (up to 10 000 per change) | Restricting changes would block legitimate restructuring; redirects keep existing links working |
 | Per-request rendering with ETags instead of an HTML cache | Always fresh after publishing; caching and invalidation belong to the performance milestone |
 
 ## Capabilities

@@ -1,6 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Connect, type Plugin } from 'vite';
 import { ADMIN_SECURITY_HEADERS } from './security-headers.ts';
 
 // The admin is served under /admin/ and talks to the API on the same origin (/api). During
@@ -14,9 +14,33 @@ const proxy = {
   '^/(?!admin(?:/|$)|api(?:/|$)|uploads(?:/|$)).*': { target: siteTarget },
 };
 
+/**
+ * "/admin" → "/admin/", as nginx does in production. The dashboard lives at the router's index route, whose
+ * URL has no trailing slash; without this a reload would hit Vite's base-URL notice instead of the app.
+ */
+const adminTrailingSlash: Connect.NextHandleFunction = (req, res, next) => {
+  const url = req.url ?? '';
+  if (url === '/admin' || url.startsWith('/admin?')) {
+    res.statusCode = 301;
+    res.setHeader('Location', `/admin/${url.slice('/admin'.length)}`);
+    res.end();
+    return;
+  }
+  next();
+};
+const adminRedirect: Plugin = {
+  name: 'nexora-admin-trailing-slash',
+  configureServer(server) {
+    server.middlewares.use(adminTrailingSlash);
+  },
+  configurePreviewServer(server) {
+    server.middlewares.use(adminTrailingSlash);
+  },
+};
+
 export default defineConfig({
   base: '/admin/',
-  plugins: [react(), tailwindcss()],
+  plugins: [adminRedirect, react(), tailwindcss()],
   server: {
     port: 5173,
     strictPort: true,

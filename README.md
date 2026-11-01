@@ -3,12 +3,12 @@
 An extensible, self-hostable content management system and visual website builder, built with
 TypeScript, NestJS, PostgreSQL and React.
 
-> **Status: Milestone 3 of 8 (content, media and background jobs).** The foundation, identity and access
-> control, the content model (posts, pages, custom content types with custom fields, categories, tags and custom
-> taxonomies, revisions, scheduling, trash), the media library and a durable job queue with SMTP mail are in place.
-> The public site, themes, the visual editor and plugins are **not implemented yet**: content is managed and stored,
-> not yet published to visitors. See [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for exactly
-> what works and what does not.
+> **Status: Milestone 4 of 8 (public site, themes and Delivery API).** The foundation, identity and access
+> control, the content model, the media library, a durable job queue, and now the **public website** are in
+> place: published content is rendered by a starter theme, with menus, SEO tags, sitemap, RSS, redirects and
+> private preview links. The visual page builder (M5) and plugins (M6) are **not implemented yet**; pages use the
+> rich-text editor. See [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for exactly what works and
+> what does not.
 
 ## What exists today
 
@@ -27,12 +27,20 @@ TypeScript, NestJS, PostgreSQL and React.
   responsive variants, alt text and captions, local or S3-compatible storage, safe file serving.
 - **Background jobs** (M3): a PostgreSQL job queue with retries, recurring tasks (scheduled publishing,
   maintenance), a separate worker process option, SMTP mail with TLS, and an operator view.
-- **Admin** (`apps/admin`, React 19 + Vite 8 + Tailwind 4): setup, sign-in, users, roles, audit log, profile,
-  content lists and editor, media library, terms, content type builder, background jobs, command palette (Ctrl+K),
-  in a responsive dashboard shell served under `/admin/` behind a strict Content Security Policy.
-- **Design system** (`packages/ui`), **shared contracts** (`packages/shared`), and the **`nexora` CLI** (`packages/cli`).
+- **Public site** (M4, `apps/site-runtime`): server-rendered pages for published content only (home with latest
+  posts or a static page, posts, nested pages, custom types, category/tag archives, pagination), built from the
+  public Delivery API; a starter theme (responsive, light/dark, right-to-left ready, no client-side JavaScript)
+  with validated theme settings; menus; titles, descriptions, canonical URLs, Open Graph, JSON-LD, `sitemap.xml`,
+  `robots.txt` and RSS; automatic and manual redirects; one-hour private preview links; a Content Security Policy
+  that allows no scripts at all.
+- **Admin** (`apps/admin`, React 19 + Vite 8 + Tailwind 4): dashboard, setup, sign-in, users, roles, audit log,
+  profile, content lists and editor (with SEO panel, view and preview), media library, terms, content type builder,
+  appearance (site identity, reading, theme settings), menus, SEO and redirects, background jobs, command palette
+  (Ctrl+K), in a responsive shell served under `/admin/` behind a strict Content Security Policy.
+- **Design system** (`packages/ui`), **shared contracts** (`packages/shared`), **theme SDK and starter theme**
+  (`packages/theme-sdk`, `packages/theme-starter`), and the **`nexora` CLI** (`packages/cli`).
 - **Docker Compose** dev services (PostgreSQL 17, Valkey 8) and a production-like profile (migrate, API, worker,
-  admin/nginx).
+  site runtime, nginx edge serving the site at `/` and the admin at `/admin/`).
 - **CI**: lint, format, typecheck, build, bundle-size budget, unit/integration (with PostgreSQL, Valkey and an
   S3-compatible server), E2E on three viewports, migration drift check, dependency audit, Node 23.7/24
   compatibility, image builds.
@@ -61,7 +69,7 @@ Full instructions: [`docs/development/getting-started.md`](docs/development/gett
 
 | Command | Purpose |
 |---|---|
-| `pnpm nexora dev [--no-infra]` | Start services, apply migrations, run the API and admin in watch mode |
+| `pnpm nexora dev [--no-infra]` | Start services, apply migrations, run the API, site runtime and admin in watch mode (site at `http://localhost:5173/`, admin at `/admin/`) |
 | `pnpm nexora build` | Production build of every package |
 | `pnpm nexora test [--e2e]` | Unit and integration tests, or the Playwright end-to-end suite |
 | `pnpm nexora lint` / `typecheck` | ESLint + Prettier check / strict TypeScript |
@@ -74,7 +82,10 @@ Full instructions: [`docs/development/getting-started.md`](docs/development/gett
 ```
 apps/api           NestJS API (modular monolith)
 apps/admin         Admin dashboard (React SPA, served at /admin/)
+apps/site-runtime  Public site (server-side React rendering from the Delivery API)
 packages/shared    Runtime-validated API contracts (Zod)
+packages/theme-sdk Theme types, safe rendering components, helpers
+packages/theme-starter  The starter theme
 packages/ui        Design tokens and accessible components
 packages/cli       nexora developer CLI
 infrastructure/    Dockerfiles, nginx and PostgreSQL init config

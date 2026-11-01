@@ -22,8 +22,8 @@ pnpm nexora dev
 
 1. creates `.env` from `.env.example` if it is missing (development values only);
 2. starts PostgreSQL 17 and Valkey 8 with `docker compose up --detach --wait`;
-3. builds `@nexora/shared` and applies database migrations;
-4. runs the API (`http://localhost:3000`, tsc watch + restart), the admin (`http://localhost:5173/admin/`, Vite) and the shared-contracts compiler in watch mode.
+3. builds the shared contracts and the themes (`@nexora/shared`, `@nexora/theme-sdk`, `@nexora/theme-starter`) and applies database migrations;
+4. runs in watch mode: the API (`http://localhost:3000`), the public site runtime (`http://localhost:4321`), the admin (Vite) and the package compilers. Open everything through Vite on one origin: the public site at <http://localhost:5173/> and the admin at <http://localhost:5173/admin/> (Vite proxies `/api` and `/uploads` to the API and every other path to the site runtime).
 
 ### First sign-in: the setup wizard
 
@@ -66,6 +66,7 @@ pnpm nexora doctor
 Useful URLs while `nexora dev` is running:
 
 - Admin: <http://localhost:5173/admin/>
+- Public site: <http://localhost:5173/> (until something is published, the home page lists no posts)
 - API readiness: <http://localhost:3000/api/v1/health/ready>
 - API docs (Swagger UI): <http://localhost:3000/api/docs/> (the raw document is at `/api/docs/openapi.json`)
 
@@ -92,7 +93,7 @@ Every command below is implemented in `packages/cli`. Run `pnpm nexora help` for
 
 | Command | What it does |
 |---|---|
-| `nexora dev [--no-infra]` | Start services, apply migrations, and run the API, admin and shared package in watch mode |
+| `nexora dev [--no-infra]` | Start services, apply migrations, and run the API, site runtime, admin and packages in watch mode |
 | `nexora build` | `pnpm -r run build` (shared → API → admin) |
 | `nexora test [--e2e]` | Unit and integration tests for all packages, or the Playwright suite |
 | `nexora lint` | ESLint (zero warnings) and the Prettier check |
@@ -141,7 +142,9 @@ POSTGRES_PASSWORD='use-a-long-random-value' docker compose --profile app up --bu
 ```
 
 This builds and runs `migrate` (one-shot), `api` (`NODE_ENV=production`, `JOBS_WORKER=off`), `worker` (background
-jobs) and `admin` (nginx serving `/admin/` and proxying `/api/` and `/uploads/`) at <http://127.0.0.1:8080/admin/>.
+jobs), `site` (the public site runtime; no database access) and `admin` (the nginx edge: `/admin/`, proxying
+`/api/` and `/uploads/` to the API and everything else to `site`). The admin is at <http://127.0.0.1:8080/admin/>
+and the public site at <http://127.0.0.1:8080/>.
 Uploaded media lives in the `media-data` volume, shared by `api` and `worker`. Mail is disabled until you set
 `SMTP_HOST` (and usually `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`); TLS is required. Because the API runs in production mode it **refuses
 to start with the development password** from `.env.example`. If your `postgres-data` volume was initialised
