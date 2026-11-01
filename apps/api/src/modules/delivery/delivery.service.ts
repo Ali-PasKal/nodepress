@@ -1,6 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import {
+  allWidgets,
+  builderDocumentSchema,
+  builderMediaIds,
+  builderPlainText,
+  collectShortcodes,
+  compileBuilderCss,
+  elementIdSchema,
   encodeSitePath,
+  parseShortcodes,
+  shortcodeTexts,
+  uuidSchema,
+  type BuilderDocument,
+  type BuilderWidgetOf,
+  type RichTextDocument,
+  type DeliveryEmbed,
+  type ResolvedShortcode,
   entrySeoSchema,
   fieldDefinitionsSchema,
   PREVIEW_TOKEN_PATTERN,
@@ -87,8 +102,48 @@ interface Context {
 const NOT_FOUND: DeliveryRoute = { kind: 'not_found' };
 
 /** Start of a text, cut at a word boundary. */
+/** Text without shortcode tokens (for summaries; escaped shortcodes stay literal). */
+function withoutShortcodes(text: string): string {
+  return parseShortcodes(text)
+    .map((segment) => (segment.type === 'text' ? segment.text : ''))
+    .join('');
+}
+
+/** The delivered document leaves out embed HTML: the site loads it from its own sandboxed URL. */
+function redactEmbeds(document: BuilderDocument): BuilderDocument {
+  return {
+    ...document,
+    sections: document.sections.map((section) => ({
+      ...section,
+      children: section.children.map((column) => ({
+        ...column,
+        children: column.children.map((widget) =>
+          widget.widget === 'html' ? { ...widget, props: { ...widget.props, html: '' } } : widget,
+        ),
+      })),
+    })),
+  };
+}
+
+function builderOf(row: { editor: string; builder: Prisma.JsonValue }): BuilderDocument | null {
+  if (row.editor !== 'builder' || row.builder === null) return null;
+  return builderDocumentSchema.safeParse(row.builder).data ?? null;
+}
+
+const MAX_DYNAMIC = 20;
+
+/** Plain text of an entry's content (builder document or rich text) for summaries. */
+function plainTextOf(
+  row: { editor: string; builder: Prisma.JsonValue },
+  body: RichTextDocument | undefined,
+): string {
+  const builder = builderOf(row);
+  if (builder) return builderPlainText(builder);
+  return body ? richTextToPlainText(body) : '';
+}
+
 function summarize(text: string, length = SUMMARY_LENGTH): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
+  const flat = withoutShortcodes(text).replace(/\s+/g, ' ').trim();
   if (flat.length <= length) return flat;
   const cut = flat.slice(0, length);
   const space = cut.lastIndexOf(' ');
@@ -120,10 +175,24 @@ export class DeliveryService {
 
   /** The entry a valid, unexpired preview token names, in its latest saved state (any status). */
   async preview(token: string): Promise<DeliveryPage> {
+    const context = await this.context();
+    const row = await this.prisma.entry.findUniqueOrThrow({
+      where: { id: await this.previewEntryId(context, token) },
+      include: cardInclude,
+    });
+    const entry = await this.toEntry(context, row);
+    return {
+      site: context.site,
+      route: { kind: 'entry', entry: { ...entry, seo: { ...entry.seo, noindex: true } } },
+      preview: true,
+    };
+  }
+
+  /** The entry a valid, unexpired preview token names (creator active, entry not trashed). */
+  private async previewEntryId(context: Context, token: string): Promise<string> {
     const notFound = (): ApiException =>
       new ApiException(404, 'NOT_FOUND', 'This preview link is invalid or has expired.');
     if (!PREVIEW_TOKEN_PATTERN.test(token)) throw notFound();
-    const context = await this.context();
     const record = await this.prisma.previewToken.findUnique({
       where: { tokenHash: sha256(token) },
       select: {
@@ -141,16 +210,7 @@ export class DeliveryService {
     ) {
       throw notFound();
     }
-    const row = await this.prisma.entry.findUniqueOrThrow({
-      where: { id: record.entry.id },
-      include: cardInclude,
-    });
-    const entry = await this.toEntry(context, row);
-    return {
-      site: context.site,
-      route: { kind: 'entry', entry: { ...entry, seo: { ...entry.seo, noindex: true } } },
-      preview: true,
-    };
+    return record.entry.id;
   }
 
   async sitemap(): Promise<DeliverySitemap> {
@@ -598,7 +658,7 @@ export class DeliveryService {
       type: type?.key ?? '',
       title: row.title,
       url: this.entryUrl(context, row),
-      summary: row.excerpt !== '' ? row.excerpt : summarize(body ? richTextToPlainText(body) : ''),
+      summary: row.excerpt !== '' ? row.excerpt : summarize(plainTextOf(row, body)),
       publishedAt: (row.publishedAt ?? row.createdAt).toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       author: { displayName: row.author.displayName },
@@ -634,7 +694,14 @@ export class DeliveryService {
       }
       fields.push({ key: field.key, label: field.label, type: field.type, value, display });
     }
+    const builder = builderOf(row);
+    if (builder) mediaIds.push(...builderMediaIds(builder));
     const card = this.card(context, row);
+    const [media, shortcodes, posts] = await Promise.all([
+      this.mediaMap(context.state.id, mediaIds),
+      this.resolveShortcodes(context, shortcodeTexts(body, builder)),
+      this.resolvePostsWidgets(context, builder),
+    ]);
     return {
       ...card,
       contentType: this.typeRef(type),
@@ -643,8 +710,142 @@ export class DeliveryService {
       excerpt: row.excerpt,
       body,
       fields,
-      media: await this.mediaMap(context.state.id, mediaIds),
+      media,
       seo: entrySeoSchema.safeParse(row.seo).data ?? { title: '', description: '', noindex: false },
+      editor: builder ? 'builder' : 'rich_text',
+      builder: builder ? redactEmbeds(builder) : null,
+      builderCss: builder ? compileBuilderCss(builder) : '',
+      shortcodes,
+      posts,
     };
+  }
+
+  // ---------------------------------------------------------------------------- dynamic content
+
+  /** Latest publicly visible top-level entries of a type, optionally filtered. */
+  private async latest(
+    context: Context,
+    typeKey: string,
+    filter: Prisma.EntryWhereInput | null,
+    count: number,
+  ): Promise<DeliveryEntryCard[]> {
+    const type = [...context.types.values()].find((item) => item.key === typeKey);
+    if (!type?.isPublic || filter === null) return [];
+    const rows = await this.prisma.entry.findMany({
+      where: {
+        AND: [
+          {
+            siteId: context.state.id,
+            contentTypeId: type.id,
+            parentId: null,
+            ...publicEntryWhere(context.now),
+          },
+          filter,
+        ],
+      },
+      include: cardInclude,
+      orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
+      take: count,
+    });
+    return this.cards(context, rows);
+  }
+
+  /** Entry filter for a term given by taxonomy key and slug; null when the term does not exist. */
+  private async termFilter(
+    context: Context,
+    taxonomyKey: string,
+    slug: string | undefined,
+  ): Promise<Prisma.EntryWhereInput | null> {
+    if (slug === undefined) return {};
+    const taxonomy = [...context.taxonomies.values()].find((item) => item.key === taxonomyKey);
+    if (!taxonomy) return null;
+    const term = await this.prisma.term.findFirst({
+      where: { siteId: context.state.id, taxonomyId: taxonomy.id, slug },
+      select: { id: true },
+    });
+    return term ? { terms: { some: { termId: term.id } } } : null;
+  }
+
+  /** Data for dynamic shortcodes (posts, galleries); static ones render from their attributes. */
+  private async resolveShortcodes(
+    context: Context,
+    texts: readonly string[],
+  ): Promise<Record<string, ResolvedShortcode>> {
+    const resolved: Record<string, ResolvedShortcode> = {};
+    for (const shortcode of collectShortcodes(texts).slice(0, MAX_DYNAMIC)) {
+      if (shortcode.name === 'recent_posts') {
+        const [category, tag] = await Promise.all([
+          this.termFilter(context, 'category', shortcode.attrs.category),
+          this.termFilter(context, 'tag', shortcode.attrs.tag),
+        ]);
+        const filter = category === null || tag === null ? null : { AND: [category, tag] };
+        resolved[shortcode.key] = {
+          name: 'recent_posts',
+          items: await this.latest(context, shortcode.attrs.type, filter, shortcode.attrs.count),
+        };
+      } else if (shortcode.name === 'gallery') {
+        const media = await this.mediaMap(context.state.id, shortcode.attrs.ids);
+        resolved[shortcode.key] = {
+          name: 'gallery',
+          media: shortcode.attrs.ids.flatMap((id) => {
+            const item = media[id];
+            return item?.mimeType.startsWith('image/') ? [item] : [];
+          }),
+        };
+      }
+    }
+    return resolved;
+  }
+
+  private async resolvePostsWidgets(
+    context: Context,
+    builder: BuilderDocument | null,
+  ): Promise<Record<string, DeliveryEntryCard[]>> {
+    const posts: Record<string, DeliveryEntryCard[]> = {};
+    const widgets = (builder ? allWidgets(builder) : []).filter(
+      (widget): widget is BuilderWidgetOf<'posts'> => widget.widget === 'posts',
+    );
+    for (const widget of widgets.slice(0, MAX_DYNAMIC)) {
+      const filter = widget.props.termId
+        ? { terms: { some: { termId: widget.props.termId } } }
+        : {};
+      posts[widget.id] = await this.latest(context, widget.props.type, filter, widget.props.count);
+    }
+    return posts;
+  }
+
+  // ---------------------------------------------------------------------------- embeds
+
+  /** HTML of an embed widget on a publicly visible entry. */
+  async embed(entryId: string, widgetId: string): Promise<DeliveryEmbed> {
+    if (!uuidSchema.safeParse(entryId).success || !elementIdSchema.safeParse(widgetId).success) {
+      throw new ApiException(404, 'NOT_FOUND', 'Embed not found.');
+    }
+    const context = await this.context();
+    const row = await this.visibleEntry(context, { id: entryId });
+    return this.embedOf(row, widgetId);
+  }
+
+  /** HTML of an embed widget on the entry a valid preview token names (latest saved state). */
+  async previewEmbed(token: string, widgetId: string): Promise<DeliveryEmbed> {
+    if (!elementIdSchema.safeParse(widgetId).success) {
+      throw new ApiException(404, 'NOT_FOUND', 'Embed not found.');
+    }
+    const context = await this.context();
+    const entryId = await this.previewEntryId(context, token);
+    const row = await this.prisma.entry.findUnique({
+      where: { id: entryId },
+      include: cardInclude,
+    });
+    return this.embedOf(row, widgetId);
+  }
+
+  private embedOf(row: CardRow | null, widgetId: string): DeliveryEmbed {
+    const builder = row ? builderOf(row) : null;
+    const widget = builder ? allWidgets(builder).find((item) => item.id === widgetId) : undefined;
+    if (widget?.widget !== 'html') {
+      throw new ApiException(404, 'NOT_FOUND', 'Embed not found.');
+    }
+    return { html: widget.props.html, title: widget.props.title };
   }
 }

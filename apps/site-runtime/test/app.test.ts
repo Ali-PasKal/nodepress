@@ -1,3 +1,10 @@
+import { createHash } from 'node:crypto';
+import {
+  builderDocumentSchema,
+  compileBuilderCss,
+  createSection,
+  createWidget,
+} from '@nexora/shared';
 import type { Express } from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -193,6 +200,83 @@ describe('site runtime', () => {
     await request(app).get('/robots.txt').expect(503);
   });
 
+  it('renders builder pages with their compiled styles allowed by a CSP hash', async () => {
+    const heading = createWidget('heading');
+    heading.props.text = 'Built visually';
+    heading.styles = { desktop: { fontSize: 44 } };
+    const shortcode = createWidget('shortcode');
+    shortcode.props.code = '[button text="Shop" url="/shop"] [year]';
+    const embed = createWidget('html');
+    const section = createSection([100]);
+    section.children[0]!.children.push(heading, shortcode, embed);
+    const document = builderDocumentSchema.parse({
+      schemaVersion: 1,
+      settings: { hideTitle: true },
+      sections: [section],
+    });
+    const builderCss = compileBuilderCss(document);
+    const page = entry({
+      title: 'Landing',
+      url: '/landing',
+      editor: 'builder',
+      builder: document,
+      builderCss,
+      contentType: { key: 'page', name: 'Page', pluralName: 'Pages', hierarchical: true },
+    });
+    api.routes.set('/landing', { kind: 'entry', entry: page });
+    const response = await request(app).get('/landing').expect(200);
+    const digest = createHash('sha256').update(builderCss).digest('base64');
+    expect(response.headers['content-security-policy']).toContain(
+      `style-src 'self' 'sha256-${digest}'`,
+    );
+    expect(response.headers['content-security-policy']).toContain(
+      "frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com",
+    );
+    expect(response.text).toContain(`<style>${builderCss}</style>`);
+    expect(response.text).toContain(`.nx-el-${heading.id}{font-size:44px}`);
+    expect(response.text).toMatch(
+      /<link rel="stylesheet" href="\/_assets\/builder\.[A-Za-z0-9_-]{16}\.css">/,
+    );
+    expect(response.text).toContain('Built visually');
+    expect(response.text).toContain('<a href="/shop" class="nx-btn nx-btn-primary">Shop</a>');
+    expect(response.text).toContain(String(new Date().getFullYear()));
+    expect(response.text).toContain(`src="/_embed/${page.id}/${embed.id}"`);
+    // Ordinary pages keep the plain policy.
+    api.routes.set('/blog/hello', { kind: 'entry', entry: entry() });
+    const plain = await request(app).get('/blog/hello').expect(200);
+    expect(plain.headers['content-security-policy']).toContain("style-src 'self';");
+    expect(plain.text).not.toContain('<style>');
+  });
+
+  it('serves HTML embeds in a sandboxed, opaque-origin document', async () => {
+    const entryId = '0191a0b0-0000-7000-8000-0000000000aa';
+    api.embeds.set(`${entryId}/abcd1234`, {
+      html: '<script>alert(1)</script><p>Map</p>',
+      title: 'Map <b>',
+    });
+    const response = await request(app).get(`/_embed/${entryId}/abcd1234`).expect(200);
+    expect(response.headers['content-security-policy']).toBe(
+      "sandbox allow-scripts allow-popups allow-forms; frame-ancestors 'self'",
+    );
+    expect(response.headers['x-robots-tag']).toBe('noindex');
+    expect(response.text).toContain('<script>alert(1)</script><p>Map</p>');
+    expect(response.text).toContain('<title>Map &lt;b&gt;</title>');
+    await request(app).get(`/_embed/${entryId}/zzzz9999`).expect(404);
+    await request(app).get(`/_embed/not-a-uuid/abcd1234`).expect(404);
+    const token = 'T'.repeat(43);
+    api.embeds.set(`${token}/abcd1234`, { html: '<p>Draft map</p>', title: 'Map' });
+    const preview = await request(app).get(`/_preview/${token}/embed/abcd1234`).expect(200);
+    expect(preview.headers['cache-control']).toBe('no-store');
+    expect(preview.headers['content-security-policy']).toContain('sandbox');
+    expect(
+      api.calls.filter((call) => call.startsWith('embed') || call.startsWith('preview-embed')),
+    ).toEqual([
+      `embed ${entryId} abcd1234`,
+      `embed ${entryId} zzzz9999`,
+      `preview-embed ${token} abcd1234`,
+    ]);
+  });
+
   it('tells visitors of a fresh installation where to finish the setup', async () => {
     api.notInstalled = true;
     const response = await request(app).get('/').expect(503);
@@ -275,8 +359,9 @@ describe('site runtime', () => {
     const hrefs = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map(
       (match) => match[1] ?? '',
     );
-    expect(hrefs).toHaveLength(2);
-    const [themeCss, varsCss] = hrefs as [string, string];
+    expect(hrefs).toHaveLength(3);
+    const [builderCss, themeCss, varsCss] = hrefs as [string, string, string];
+    expect((await request(app).get(builderCss).expect(200)).text).toContain('container-name: nxb');
     expect(themeCss).toMatch(/^\/_assets\/starter\.[A-Za-z0-9_-]{16}\.css$/);
     const css = await request(app).get(themeCss).expect(200);
     expect(css.headers['cache-control']).toBe('public, max-age=31536000, immutable');

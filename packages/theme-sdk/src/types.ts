@@ -24,6 +24,8 @@ export interface ThemeRenderContext {
   readonly preview: boolean;
   /** URL of another page of the current listing ("/blog?page=2"). */
   pageUrl(page: number): string;
+  /** URL of the sandboxed document of an HTML embed widget on the current entry. */
+  readonly embedUrl: (widgetId: string) => string;
 }
 
 /**

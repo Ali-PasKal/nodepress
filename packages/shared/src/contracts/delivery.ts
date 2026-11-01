@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, uuidSchema } from './common.js';
+import { builderDocumentSchema } from './builder.js';
 import { FIELD_TYPES } from './fields.js';
 import { richTextDocumentSchema } from './rich-text.js';
 
@@ -132,6 +133,13 @@ export const deliveryFieldSchema = z.object({
 });
 export type DeliveryField = z.infer<typeof deliveryFieldSchema>;
 
+/** Data a dynamic shortcode needs, resolved by the API (static shortcodes render from their attributes). */
+export const resolvedShortcodeSchema = z.discriminatedUnion('name', [
+  z.object({ name: z.literal('recent_posts'), items: z.array(deliveryEntryCardSchema) }),
+  z.object({ name: z.literal('gallery'), media: z.array(deliveryMediaSchema) }),
+]);
+export type ResolvedShortcode = z.infer<typeof resolvedShortcodeSchema>;
+
 export const deliveryEntrySchema = deliveryEntryCardSchema.extend({
   contentType: deliveryTypeRefSchema,
   slug: z.string(),
@@ -144,6 +152,14 @@ export const deliveryEntrySchema = deliveryEntryCardSchema.extend({
   /** Media referenced by the body and by media fields, keyed by id. */
   media: z.record(z.string(), deliveryMediaSchema),
   seo: z.object({ title: z.string(), description: z.string(), noindex: z.boolean() }),
+  editor: z.enum(['rich_text', 'builder']),
+  builder: builderDocumentSchema.nullable(),
+  /** CSS compiled from the builder document's validated styles (empty for rich text). */
+  builderCss: z.string(),
+  /** Resolved data for dynamic shortcodes, keyed by `shortcodeKey`. */
+  shortcodes: z.record(z.string(), resolvedShortcodeSchema),
+  /** Entries for each posts widget, keyed by widget id. */
+  posts: z.record(z.string(), z.array(deliveryEntryCardSchema)),
 });
 export type DeliveryEntry = z.infer<typeof deliveryEntrySchema>;
 
@@ -198,6 +214,10 @@ export const deliveryPageSchema = z.object({
   preview: z.boolean(),
 });
 export type DeliveryPage = z.infer<typeof deliveryPageSchema>;
+
+/** The HTML of one embed widget, served by the site runtime in a sandboxed document. */
+export const deliveryEmbedSchema = z.object({ html: z.string(), title: z.string() });
+export type DeliveryEmbed = z.infer<typeof deliveryEmbedSchema>;
 
 export const DELIVERY_PATH_MAX_LENGTH = 2_000;
 

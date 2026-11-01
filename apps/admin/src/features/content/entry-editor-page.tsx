@@ -1,8 +1,11 @@
 import {
+  allWidgets,
   buildFieldValuesSchema,
+  builderPlainText,
   EMPTY_RICH_TEXT,
   richTextDocumentSchema,
   slugify,
+  type BuilderDocument,
   type ContentTypeInfo,
   type EntryDetail,
   type EntrySeo,
@@ -40,6 +43,7 @@ import {
   Eye,
   History,
   ImageIcon,
+  LayoutTemplate,
   Loader2,
   RotateCcw,
   Trash2,
@@ -185,6 +189,24 @@ function ParentSelect({
   );
 }
 
+/** What a builder revision contains (its layout is edited in the builder, not shown here). */
+function BuilderSummary({ document }: { document: BuilderDocument }) {
+  const text = builderPlainText(document);
+  const widgets = allWidgets(document).length;
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-medium">
+        Visual builder layout: {document.sections.length}{' '}
+        {document.sections.length === 1 ? 'section' : 'sections'}, {widgets}{' '}
+        {widgets === 1 ? 'widget' : 'widgets'}
+      </p>
+      {text ? (
+        <p className="line-clamp-6 text-sm text-muted-foreground">{text.slice(0, 600)}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function RevisionsDialog({
   entry,
   open,
@@ -257,7 +279,11 @@ function RevisionsDialog({
                 {revision.data.snapshot.excerpt && (
                   <p className="text-sm italic">{revision.data.snapshot.excerpt}</p>
                 )}
-                <RichTextView document={revision.data.snapshot.body} />
+                {revision.data.snapshot.editor === 'builder' && revision.data.snapshot.builder ? (
+                  <BuilderSummary document={revision.data.snapshot.builder} />
+                ) : (
+                  <RichTextView document={revision.data.snapshot.body} />
+                )}
                 {canRestore && revision.data.entryVersion !== entry.version && (
                   <div>
                     <Button
@@ -306,6 +332,76 @@ function RevisionsDialog({
         />
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Entry point to the visual builder (and back to the text editor) for types that support it. */
+function BuilderNotice({
+  type,
+  entry,
+  disabled,
+  onSwitchedBack,
+}: {
+  type: ContentTypeInfo;
+  entry: EntryDetail | null;
+  disabled: boolean;
+  onSwitchedBack: (saved: EntryDetail) => void;
+}) {
+  const update = useUpdateEntry();
+  if (!entry) {
+    return (
+      <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+        Save this {type.name.toLowerCase()} once to lay it out with the visual builder.
+      </p>
+    );
+  }
+  const builderLink = `/content/${type.key}/${entry.id}/builder`;
+  if (entry.editor !== 'builder') {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed p-3">
+        <p className="text-sm text-muted-foreground">Prefer sections, columns and widgets?</p>
+        <Button variant="outline" size="sm" asChild>
+          <Link to={builderLink}>
+            <LayoutTemplate aria-hidden="true" /> Edit with the visual builder
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-4">
+      <p className="text-sm">
+        This {type.name.toLowerCase()} is laid out with the <strong>visual builder</strong>.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" asChild>
+          <Link to={builderLink}>
+            <LayoutTemplate aria-hidden="true" /> Open the builder
+          </Link>
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled || update.isPending}
+          onClick={() => {
+            update.mutate(
+              { id: entry.id, input: { version: entry.version, editor: 'rich_text' } },
+              {
+                onSuccess: (saved) => {
+                  onSwitchedBack(saved);
+                  toast.success(
+                    'Switched to the text editor. The layout is kept if you switch back.',
+                  );
+                },
+                onError: (error) => toast.error(errorMessage(error)),
+              },
+            );
+          }}
+        >
+          Use the text editor instead
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -756,7 +852,18 @@ function EntryEditor({
               />
             )}
           </Field>
-          {type.hasBody && (
+          {type.hasBuilder && (
+            <BuilderNotice
+              type={type}
+              entry={entry}
+              disabled={!editable || trashed || dirty}
+              onSwitchedBack={(saved) => {
+                adopt(saved);
+                setEditorKey((key) => key + 1);
+              }}
+            />
+          )}
+          {type.hasBody && entry?.editor !== 'builder' && (
             <div className="flex flex-col gap-1.5">
               <Label>Content</Label>
               <RichTextEditor

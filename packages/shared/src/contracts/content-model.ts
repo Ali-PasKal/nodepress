@@ -46,6 +46,8 @@ export const contentTypeSchema = z.object({
   hasBody: z.boolean(),
   hasExcerpt: z.boolean(),
   hasFeaturedImage: z.boolean(),
+  /** Entries can be laid out with the visual builder. */
+  hasBuilder: z.boolean(),
   isSystem: z.boolean(),
   /** Empty for the built-in Page type (pages live at the site root). */
   routePrefix: z.string(),
@@ -65,6 +67,7 @@ const contentTypeFields = z.object({
   hasBody: z.boolean(),
   hasExcerpt: z.boolean(),
   hasFeaturedImage: z.boolean(),
+  hasBuilder: z.boolean(),
   fields: fieldDefinitionsSchema,
   taxonomyIds: z.array(uuidSchema).max(20),
   routePrefix: routePrefixSchema,
@@ -80,6 +83,7 @@ export const createContentTypeSchema = z.object({
   hasBody: z.boolean().default(true),
   hasExcerpt: z.boolean().default(true),
   hasFeaturedImage: z.boolean().default(true),
+  hasBuilder: z.boolean().default(false),
   fields: fieldDefinitionsSchema.default([]),
   taxonomyIds: z.array(uuidSchema).max(20).default([]),
   /** Defaults to the key with hyphens. */

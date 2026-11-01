@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, paginatedSchema, paginationQuerySchema, uuidSchema } from './common.js';
 import { slugSchema } from './fields.js';
+import { builderDocumentSchema } from './builder.js';
 import { richTextDocumentSchema } from './rich-text.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -32,6 +33,11 @@ export const entryPermissionsSchema = z.object({
   delete: z.boolean(),
 });
 export type EntryPermissions = z.infer<typeof entryPermissionsSchema>;
+
+/** Which editor an entry uses: the rich-text body or a visual builder document. */
+export const ENTRY_EDITORS = ['rich_text', 'builder'] as const;
+export const entryEditorSchema = z.enum(ENTRY_EDITORS);
+export type EntryEditor = z.infer<typeof entryEditorSchema>;
 
 /** Per-entry SEO overrides (empty values fall back to the title, excerpt and site defaults). */
 export const entrySeoSchema = z.object({
@@ -70,6 +76,9 @@ export const entryDetailSchema = entrySummarySchema.extend({
   termIds: z.array(uuidSchema),
   lastEditor: personSchema.nullable(),
   seo: entrySeoSchema,
+  editor: entryEditorSchema,
+  /** The builder document (kept when switching back to rich text, so nothing is lost). */
+  builder: builderDocumentSchema.nullable(),
 });
 export type EntryDetail = z.infer<typeof entryDetailSchema>;
 
@@ -114,6 +123,8 @@ export const createEntrySchema = z.object({
   status: entryStatusSchema.default('draft'),
   publishedAt: isoDateTimeSchema.nullable().optional(),
   seo: entrySeoSchema.optional(),
+  editor: entryEditorSchema.default('rich_text'),
+  builder: builderDocumentSchema.nullable().default(null),
 });
 export type CreateEntryInput = z.input<typeof createEntrySchema>;
 
@@ -131,6 +142,8 @@ export const updateEntrySchema = z.object({
   status: entryStatusSchema.optional(),
   publishedAt: isoDateTimeSchema.nullable().optional(),
   seo: entrySeoSchema.optional(),
+  editor: entryEditorSchema.optional(),
+  builder: builderDocumentSchema.nullable().optional(),
 });
 export type UpdateEntryInput = z.input<typeof updateEntrySchema>;
 
@@ -169,6 +182,9 @@ export const revisionSnapshotSchema = z.object({
   termIds: z.array(uuidSchema),
   featuredMediaId: uuidSchema.nullable(),
   parentId: uuidSchema.nullable(),
+  /** Absent in revisions recorded before the builder existed. */
+  editor: entryEditorSchema.default('rich_text'),
+  builder: builderDocumentSchema.nullable().default(null),
 });
 export type RevisionSnapshot = z.infer<typeof revisionSnapshotSchema>;
 

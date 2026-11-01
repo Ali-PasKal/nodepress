@@ -439,6 +439,7 @@ function ContentTypeForm({
   const [hasBody, setHasBody] = useState(type?.hasBody ?? true);
   const [hasExcerpt, setHasExcerpt] = useState(type?.hasExcerpt ?? true);
   const [hasFeaturedImage, setHasFeaturedImage] = useState(type?.hasFeaturedImage ?? true);
+  const [hasBuilder, setHasBuilder] = useState(type?.hasBuilder ?? false);
   const [taxonomyIds, setTaxonomyIds] = useState<string[]>(type?.taxonomyIds ?? []);
   const [routePrefix, setRoutePrefix] = useState(type?.routePrefix ?? '');
   const [prefixTouched, setPrefixTouched] = useState(type !== null);
@@ -459,6 +460,7 @@ function ContentTypeForm({
       hasBody,
       hasExcerpt,
       hasFeaturedImage,
+      hasBuilder,
       taxonomyIds,
       fields: fields.map(toDefinition) as never,
       isPublic,
@@ -576,6 +578,11 @@ function ContentTypeForm({
           { label: 'Rich-text content', checked: hasBody, set: setHasBody },
           { label: 'Excerpt', checked: hasExcerpt, set: setHasExcerpt },
           { label: 'Featured image', checked: hasFeaturedImage, set: setHasFeaturedImage },
+          {
+            label: 'Visual builder (sections, columns, widgets)',
+            checked: hasBuilder,
+            set: setHasBuilder,
+          },
         ].map((option) => (
           <Label key={option.label} className="flex items-center gap-2 font-normal">
             <Checkbox

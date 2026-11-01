@@ -1,0 +1,295 @@
+/*
+ * NEXORA builder layout and widgets. Shared by every theme (served by the site runtime) and by the admin's editor
+ * canvas, so a page looks the same in both. Breakpoints are container queries on .nx-b (container "nxb"): the
+ * editor's device preview resizes the container, not the window. Colours come from the theme's custom
+ * properties when it defines them (--nx-accent, --nx-fg, --nx-muted, --nx-border, --nx-surface, --nx-radius).
+ * Logical properties only, so right-to-left pages need no special rules.
+ */
+
+.nx-b {
+  container-type: inline-size;
+  container-name: nxb;
+  inline-size: 100%;
+}
+
+.nx-b *,
+.nx-b *::before,
+.nx-b *::after {
+  box-sizing: border-box;
+}
+
+.nx-b-section {
+  position: relative;
+  padding-inline: 1rem;
+}
+
+.nx-b-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.nx-b-boxed > .nx-b-row {
+  max-inline-size: var(--nx-builder-width, 72rem);
+  margin-inline: auto;
+}
+
+.nx-b-col {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  flex: 0 0 100%;
+}
+
+.nx-b-v-center {
+  justify-content: center;
+}
+
+.nx-b-v-end {
+  justify-content: flex-end;
+}
+
+.nx-w + .nx-w {
+  margin-block-start: 1rem;
+}
+
+.nx-w-heading {
+  margin-block: 0;
+  line-height: 1.2;
+}
+
+.nx-w-heading a {
+  color: inherit;
+}
+
+.nx-w-text .nx-prose > :last-child {
+  margin-block-end: 0;
+}
+
+.nx-w-image {
+  margin: 0;
+}
+
+.nx-w-image img {
+  display: block;
+  max-inline-size: 100%;
+  block-size: auto;
+  border-radius: inherit;
+}
+
+.nx-w-image-full img {
+  inline-size: 100%;
+}
+
+.nx-w-image figcaption {
+  margin-block-start: 0.5rem;
+  font-size: 0.875rem;
+  opacity: 0.8;
+}
+
+.nx-w-divider {
+  border: 0;
+  margin-inline: auto;
+}
+
+/* Buttons (button widget and [button] shortcode) */
+.nx-btn {
+  display: inline-block;
+  padding: 0.65rem 1.25rem;
+  border: 2px solid var(--nx-accent, #1d4ed8);
+  border-radius: var(--nx-radius, 0.5rem);
+  background: var(--nx-accent, #1d4ed8);
+  color: var(--nx-on-accent, #ffffff);
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  text-align: center;
+}
+
+.nx-btn:hover {
+  filter: brightness(1.08);
+  text-decoration: none;
+}
+
+.nx-btn-secondary {
+  background: var(--nx-fg, #1b1f24);
+  border-color: var(--nx-fg, #1b1f24);
+  color: var(--nx-bg, #ffffff);
+}
+
+.nx-btn-outline {
+  background: transparent;
+  color: var(--nx-accent, #1d4ed8);
+}
+
+.nx-btn-sm {
+  padding: 0.4rem 0.85rem;
+  font-size: 0.875rem;
+}
+
+.nx-btn-lg {
+  padding: 0.9rem 1.75rem;
+  font-size: 1.125rem;
+}
+
+.nx-btn-block {
+  display: block;
+  inline-size: 100%;
+}
+
+/* Videos */
+.nx-video {
+  position: relative;
+  inline-size: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.nx-ratio-4-3 {
+  aspect-ratio: 4 / 3;
+}
+
+.nx-ratio-1-1 {
+  aspect-ratio: 1 / 1;
+}
+
+.nx-ratio-9-16 {
+  aspect-ratio: 9 / 16;
+  max-inline-size: 24rem;
+  margin-inline: auto;
+}
+
+.nx-video iframe {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  border: 0;
+  border-radius: var(--nx-radius, 0.5rem);
+}
+
+/* HTML embeds (sandboxed documents) */
+.nx-embed {
+  display: block;
+  inline-size: 100%;
+  border: 0;
+}
+
+/* Posts grid (posts widget) and the [recent_posts] list */
+.nx-posts {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(var(--nx-cols, 3), minmax(0, 1fr));
+}
+
+.nx-posts-image img {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: var(--nx-radius, 0.5rem);
+}
+
+.nx-posts-title {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 1.15rem;
+  line-height: 1.3;
+}
+
+.nx-posts-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.nx-posts-title a:hover {
+  text-decoration: underline;
+}
+
+.nx-posts-date {
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.nx-posts-summary {
+  margin: 0.5rem 0 0;
+}
+
+.nx-sc-posts {
+  padding-inline-start: 1.25rem;
+}
+
+/* Galleries ([gallery] shortcode) */
+.nx-gallery {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(var(--nx-cols, 3), minmax(0, 1fr));
+  margin-block: 1rem;
+}
+
+.nx-gallery figure {
+  margin: 0;
+}
+
+.nx-gallery img {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--nx-radius, 0.5rem);
+}
+
+.nx-cols-1 {
+  --nx-cols: 1;
+}
+
+.nx-cols-2 {
+  --nx-cols: 2;
+}
+
+.nx-cols-3 {
+  --nx-cols: 3;
+}
+
+.nx-cols-4 {
+  --nx-cols: 4;
+}
+
+.nx-cols-5 {
+  --nx-cols: 5;
+}
+
+.nx-cols-6 {
+  --nx-cols: 6;
+}
+
+@container nxb (max-width: 1024px) {
+  .nx-posts,
+  .nx-gallery {
+    grid-template-columns: repeat(min(var(--nx-cols, 3), 2), minmax(0, 1fr));
+  }
+}
+
+@container nxb (max-width: 640px) {
+  .nx-posts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nx-gallery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Editor canvas placeholders (never rendered on the public site) */
+.nx-edit-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 4rem;
+  inline-size: 100%;
+  block-size: 100%;
+  padding: 1rem;
+  border: 2px dashed var(--nx-border, #c4cbd3);
+  border-radius: var(--nx-radius, 0.5rem);
+  font-size: 0.875rem;
+  text-align: center;
+  opacity: 0.8;
+}

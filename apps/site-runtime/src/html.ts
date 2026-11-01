@@ -58,6 +58,8 @@ export interface DocumentParts {
   readonly title: string;
   readonly head: readonly HeadTag[];
   readonly stylesheets: readonly string[];
+  /** Inline CSS blocks, each allowed by its SHA-256 in the CSP (never user-written CSS: compiled from typed values). */
+  readonly inlineStyles?: readonly string[];
   readonly body: string;
 }
 
@@ -72,6 +74,9 @@ export function renderDocument(parts: DocumentParts): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escapeHtml(parts.title)}</title>`,
     ...parts.stylesheets.map((href) => `<link rel="stylesheet" href="${escapeHtml(href)}">`),
+    ...(parts.inlineStyles ?? [])
+      .filter((css) => !/<\/?style|<!--/i.test(css))
+      .map((css) => `<style>${css}</style>`),
     ...parts.head.map(renderHeadTag),
   ].join('\n');
   return `<!doctype html>\n<html lang="${escapeHtml(parts.language)}" dir="${parts.direction}"${attributes}>\n<head>\n${head}\n</head>\n<body>\n${parts.body}\n</body>\n</html>\n`;

@@ -15,7 +15,9 @@ import {
   linkAttributes,
   readingMinutes,
   ResponsiveImage,
+  BuilderContent,
   RichText,
+  type ShortcodeContext,
   type ThemeRenderContext,
 } from '@nexora/theme-sdk';
 import type { ReactNode } from 'react';
@@ -230,15 +232,53 @@ function Fields({ entry, t }: { entry: DeliveryEntry; t: ThemeStrings }) {
 }
 
 /** A single entry: articles (dated types) show their meta, pages (hierarchical types) do not. */
+function shortcodeContext(entry: DeliveryEntry, site: DeliverySite): ShortcodeContext {
+  return { resolved: entry.shortcodes, siteName: site.name, language: site.language };
+}
+
+/** A page laid out with the visual builder: full width, title optional. */
+function BuilderEntryView({
+  entry,
+  context,
+}: {
+  entry: DeliveryEntry;
+  context: ThemeRenderContext;
+}) {
+  if (!entry.builder) return null;
+  return (
+    <article className={`nx-entry nx-entry-builder nx-entry-${entry.contentType.key}`}>
+      {entry.builder.settings.hideTitle ? null : (
+        <header className="nx-container nx-entry-header">
+          <h1 className="nx-entry-title">{entry.title}</h1>
+        </header>
+      )}
+      <BuilderContent
+        document={entry.builder}
+        context={{
+          media: entry.media,
+          posts: entry.posts,
+          shortcodes: shortcodeContext(entry, context.site),
+          embedUrl: context.embedUrl,
+        }}
+      />
+    </article>
+  );
+}
+
 function EntryView({
   entry,
   site,
   t,
+  context,
 }: {
   entry: DeliveryEntry;
   site: DeliverySite;
   t: ThemeStrings;
+  context: ThemeRenderContext;
 }) {
+  if (entry.editor === 'builder' && entry.builder) {
+    return <BuilderEntryView entry={entry} context={context} />;
+  }
   const dated = !entry.contentType.hierarchical;
   const minutes = readingMinutes(richTextToPlainText(entry.body));
   return (
@@ -270,6 +310,7 @@ function EntryView({
         media={entry.media}
         imageSizes={IMAGE_SIZES}
         className="nx-prose"
+        shortcodes={shortcodeContext(entry, site)}
       />
       <Fields entry={entry} t={t} />
       {dated ? <Terms entry={entry} /> : null}
@@ -353,7 +394,7 @@ function Main({ context, t }: { context: ThemeRenderContext; t: ThemeStrings }) 
   const { view, site } = context;
   switch (view.kind) {
     case 'home':
-      if (view.entry) return <EntryView entry={view.entry} site={site} t={t} />;
+      if (view.entry) return <EntryView entry={view.entry} site={site} t={t} context={context} />;
       return (
         <>
           <h1 className="nx-visually-hidden">{site.name}</h1>
@@ -362,7 +403,7 @@ function Main({ context, t }: { context: ThemeRenderContext; t: ThemeStrings }) 
         </>
       );
     case 'entry':
-      return <EntryView entry={view.entry} site={site} t={t} />;
+      return <EntryView entry={view.entry} site={site} t={t} context={context} />;
     case 'archive': {
       const heading =
         view.archive.type === 'term' ? view.archive.term.name : view.archive.contentType.pluralName;
@@ -385,6 +426,16 @@ function Main({ context, t }: { context: ThemeRenderContext; t: ThemeStrings }) 
   }
 }
 
+function builderPage(context: ThemeRenderContext): boolean {
+  const entry =
+    context.view.kind === 'entry'
+      ? context.view.entry
+      : context.view.kind === 'home'
+        ? context.view.entry
+        : null;
+  return entry?.editor === 'builder' && entry.builder !== null;
+}
+
 function Page(context: ThemeRenderContext) {
   const t = stringsFor(context.site.language);
   return (
@@ -398,7 +449,11 @@ function Page(context: ThemeRenderContext) {
         </div>
       ) : null}
       <Header context={context} t={t} />
-      <main id="content" className="nx-container nx-main" tabIndex={-1}>
+      <main
+        id="content"
+        className={builderPage(context) ? 'nx-main nx-main-builder' : 'nx-container nx-main'}
+        tabIndex={-1}
+      >
         <Main context={context} t={t} />
       </main>
       <Footer context={context} t={t} />

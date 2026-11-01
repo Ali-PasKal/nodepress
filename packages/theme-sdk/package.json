@@ -4,15 +4,19 @@
   "private": true,
   "description": "Types, safe rendering components and helpers for NEXORA themes",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./builder.css": "./assets/builder.css"
   },
   "files": [
-    "dist"
+    "dist",
+    "assets"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

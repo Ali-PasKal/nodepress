@@ -1,5 +1,10 @@
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import {
+  allWidgets,
+  builderDocumentSchema,
+  builderFromRichText,
+  builderMediaIds,
+  builderPlainText,
   buildFieldValuesSchema,
   EMPTY_RICH_TEXT,
   entrySeoSchema,
@@ -13,6 +18,8 @@ import {
   type EntryBulkResponse,
   type EntryDetail,
   type EntryListResponse,
+  type BuilderDocument,
+  type EntryEditor,
   type EntrySeo,
   type EntryStatus,
   type EntrySummary,
@@ -106,6 +113,21 @@ interface EntryContent {
   termIds: string[];
   featuredMediaId: string | null;
   parentId: string | null;
+  editor: EntryEditor;
+  builder: BuilderDocument | null;
+}
+
+/** HTML embed widgets of a document, by id (to detect added or changed embeds). */
+function htmlEmbeds(document: BuilderDocument | null): Map<string, string> {
+  const embeds = new Map<string, string>();
+  for (const widget of document ? allWidgets(document) : []) {
+    if (widget.widget === 'html') embeds.set(widget.id, widget.props.html);
+  }
+  return embeds;
+}
+
+function builderJson(document: BuilderDocument | null) {
+  return document === null ? Prisma.DbNull : (document as unknown as Prisma.InputJsonValue);
 }
 
 function actorOf(auth: AuthContext): PolicyActor {
@@ -133,8 +155,12 @@ function seoOf(value: Prisma.JsonValue): EntrySeo {
   return parsed.success ? parsed.data : entrySeoSchema.parse({});
 }
 
-function searchTextOf(title: string, excerpt: string, body: RichTextDocument): string {
-  return `${title}\n${excerpt}\n${richTextToPlainText(body)}`.toLowerCase().slice(0, 100_000);
+function searchTextOf(content: EntryContent): string {
+  const builder =
+    content.editor === 'builder' && content.builder ? builderPlainText(content.builder) : '';
+  return `${content.title}\n${content.excerpt}\n${richTextToPlainText(content.body)}\n${builder}`
+    .toLowerCase()
+    .slice(0, 100_000);
 }
 
 /**
@@ -247,7 +273,7 @@ export class EntriesService implements OnModuleInit {
     if (!canCreate(actor, input.status)) {
       throw FORBIDDEN();
     }
-    const content = await this.validateContent(auth.siteId, type, {
+    const content = await this.validateContent(auth.siteId, type, actor, null, {
       title: input.title,
       slug: input.slug ?? '',
       excerpt: input.excerpt,
@@ -256,6 +282,8 @@ export class EntriesService implements OnModuleInit {
       termIds: input.termIds,
       featuredMediaId: input.featuredMediaId,
       parentId: input.parentId,
+      editor: input.editor,
+      builder: input.builder,
     });
     this.assertTitleForStatus(content.title, input.status);
     const publishedAt = this.resolvePublishedAt(input.status, input.publishedAt, null);
@@ -291,8 +319,10 @@ export class EntriesService implements OnModuleInit {
             excerpt: content.excerpt,
             body: content.body as unknown as Prisma.InputJsonValue,
             fields: content.fields,
-            searchText: searchTextOf(content.title, content.excerpt, content.body),
+            searchText: searchTextOf(content),
             featuredMediaId: content.featuredMediaId,
+            editor: content.editor,
+            builder: builderJson(content.builder),
             publishedAt,
             seo: input.seo ?? entrySeoSchema.parse({}),
             terms: { create: content.termIds.map((termId) => ({ termId })) },
@@ -341,6 +371,8 @@ export class EntriesService implements OnModuleInit {
       'parentId',
       'termIds',
       'featuredMediaId',
+      'editor',
+      'builder',
     ] as const;
     const currentSeo = seoOf(current.seo);
     const changesSeo = input.seo !== undefined && stableJson(input.seo) !== stableJson(currentSeo);
@@ -367,7 +399,7 @@ export class EntriesService implements OnModuleInit {
     const type = await this.model.definitionById(current.contentTypeId);
     const previous = this.contentOf(current);
     const content = changesContent
-      ? await this.validateContent(auth.siteId, type, {
+      ? await this.validateContent(auth.siteId, type, actor, previous.builder, {
           title: input.title ?? previous.title,
           slug: input.slug ?? previous.slug,
           excerpt: input.excerpt ?? previous.excerpt,
@@ -377,6 +409,8 @@ export class EntriesService implements OnModuleInit {
           featuredMediaId:
             input.featuredMediaId !== undefined ? input.featuredMediaId : previous.featuredMediaId,
           parentId: input.parentId !== undefined ? input.parentId : previous.parentId,
+          editor: input.editor ?? previous.editor,
+          builder: input.builder !== undefined ? input.builder : previous.builder,
         })
       : previous;
     this.assertTitleForStatus(content.title, nextStatus);
@@ -421,8 +455,10 @@ export class EntriesService implements OnModuleInit {
             excerpt: content.excerpt,
             body: content.body as unknown as Prisma.InputJsonValue,
             fields: content.fields,
-            searchText: searchTextOf(content.title, content.excerpt, content.body),
+            searchText: searchTextOf(content),
             featuredMediaId: content.featuredMediaId,
+            editor: content.editor,
+            builder: builderJson(content.builder),
             status: nextStatus,
             publishedAt,
             ...(changesSeo && input.seo ? { seo: input.seo } : {}),
@@ -701,6 +737,8 @@ export class EntriesService implements OnModuleInit {
         termIds: terms.map((term) => term.id),
         featuredMediaId: media?.id ?? null,
         parentId: parent?.id ?? null,
+        editor: snapshot.editor,
+        builder: snapshot.builder,
       },
       meta,
     );
@@ -802,6 +840,9 @@ export class EntriesService implements OnModuleInit {
       termIds: row.terms.map((link) => link.term.id),
       featuredMediaId: row.featuredMediaId,
       parentId: row.parentId,
+      editor: row.editor === 'builder' ? 'builder' : 'rich_text',
+      builder:
+        row.builder === null ? null : (builderDocumentSchema.safeParse(row.builder).data ?? null),
     };
   }
 
@@ -809,8 +850,38 @@ export class EntriesService implements OnModuleInit {
   private async validateContent(
     siteId: string,
     type: ContentTypeDefinition,
+    actor: PolicyActor,
+    previousBuilder: BuilderDocument | null,
     input: Omit<EntryContent, 'fields'> & { fields: Record<string, unknown> },
   ): Promise<EntryContent> {
+    if (input.editor === 'builder' && !type.hasBuilder) {
+      throw invalid('editor', 'This content type does not use the visual builder.');
+    }
+    // Switching to the builder without a document starts from the existing rich-text body.
+    const builder =
+      input.editor === 'builder' && input.builder === null
+        ? builderDocumentSchema.parse(builderFromRichText(input.body))
+        : input.builder;
+    if (builder) {
+      const before = htmlEmbeds(previousBuilder);
+      const changed = [...htmlEmbeds(builder)].some(([id, html]) => before.get(id) !== html);
+      if (changed && !actor.capabilities.has('content.embed_html')) {
+        throw new ApiException(
+          403,
+          'FORBIDDEN',
+          'You do not have permission to add or change HTML embeds.',
+        );
+      }
+      const mediaIds = builderMediaIds(builder);
+      if (mediaIds.length > 0) {
+        const found = await this.prisma.media.count({
+          where: { id: { in: mediaIds }, siteId, mimeType: { startsWith: 'image/' } },
+        });
+        if (found !== mediaIds.length) {
+          throw invalid('builder', 'An image in the layout no longer exists in the media library.');
+        }
+      }
+    }
     const fields = buildFieldValuesSchema(type.fields).safeParse(input.fields);
     if (!fields.success) {
       throw new ApiException(
@@ -869,6 +940,8 @@ export class EntriesService implements OnModuleInit {
       termIds,
       featuredMediaId: input.featuredMediaId,
       parentId: input.parentId,
+      editor: input.editor,
+      builder,
     };
   }
 
@@ -1169,6 +1242,8 @@ export class EntriesService implements OnModuleInit {
       termIds: content.termIds,
       lastEditor: row.lastEditor,
       seo: seoOf(row.seo),
+      editor: content.editor,
+      builder: content.builder,
     };
   }
 }

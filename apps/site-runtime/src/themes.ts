@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { resolveThemeSettings, type ThemeSettingValues } from '@nexora/shared';
 import type { ThemeModule } from '@nexora/theme-sdk';
 import { theme as starter } from '@nexora/theme-starter/render';
@@ -43,6 +44,8 @@ export function variablesCss(variables: Readonly<Record<string, string>>): strin
 export class ThemeSet {
   private readonly themes = new Map<string, LoadedTheme>();
   private readonly assets = new Map<string, StaticAsset>();
+  /** Builder layout and widget styles (shared by all themes and the editor canvas). */
+  builderHref = '';
 
   private constructor(private readonly fallbackKey: string) {}
 
@@ -50,6 +53,13 @@ export class ThemeSet {
     const first = modules[0];
     if (!first) throw new Error('At least one theme is required.');
     const set = new ThemeSet(first.manifest.key);
+    const builderCss = await readFile(
+      fileURLToPath(import.meta.resolve('@nexora/theme-sdk/builder.css')),
+      'utf8',
+    );
+    const builderName = `builder.${hash(builderCss)}.css`;
+    set.assets.set(builderName, { body: builderCss, contentType: 'text/css; charset=utf-8' });
+    set.builderHref = `/_assets/${builderName}`;
     for (const module of modules) {
       const css = await readFile(module.stylesheet, 'utf8');
       const name = `${module.manifest.key}.${hash(css)}.css`;

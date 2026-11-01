@@ -119,6 +119,8 @@ When `OPENAPI_ENABLED` is on (the default outside production), the running API s
 | GET | `/api/v1/delivery/site` | public | Site identity, SEO defaults, resolved theme settings and menus |
 | GET | `/api/v1/delivery/page?path=&page=` | public | Resolve a public path: `home`, `entry`, `archive`, `redirect` or `not_found` (always 200; the route says which) |
 | GET | `/api/v1/delivery/preview/{token}` | public + token | The entry a valid preview token names, in its latest saved state (`no-store`; 404 when invalid or expired) |
+| GET | `/api/v1/delivery/embed/{entryId}/{widgetId}` | public | HTML of an HTML embed widget on a publicly visible builder entry (`{ title, html }`; the site serves it as a sandboxed document) |
+| GET | `/api/v1/delivery/preview/{token}/embed/{widgetId}` | public + token | The same for the entry a valid preview token names (`no-store`, no referrer) |
 | GET | `/api/v1/delivery/sitemap` | public | Public URLs for `sitemap.xml` (max. 50 000) |
 | GET | `/api/v1/delivery/feed` | public | The 20 latest posts for the RSS feed |
 
@@ -139,3 +141,24 @@ root (`/about/team`), custom types at `/{prefix}/{path}`, term archives at `/{ta
 archives at `/{prefix}`, listings paginated with `?page=N`. Paths are sent decoded (`/درباره-ما`); redirect
 locations come back percent-encoded. When a published entry's path, a term's slug or a route prefix changes, the
 API records permanent redirects from the old addresses (chains are flattened).
+
+**Builder documents (M5).** Entries have an `editor` field (`rich_text` or `builder`) and a `builder` document
+(or `null`). Only content types with `hasBuilder` (pages by default) accept `editor: "builder"`. A builder document
+is `{ schemaVersion: 1, settings: { hideTitle }, sections: [...] }`: sections contain columns (widths in percent per
+breakpoint) and columns contain widgets (`heading`, `text`, `image`, `button`, `spacer`, `divider`, `video`, `posts`,
+`shortcode`, `html`). Every element has an 8-character id and typed styles per breakpoint (`desktop`, `tablet`,
+`mobile`); there is no free-form CSS or HTML except in `html` widgets. The same schema validates documents in the
+admin and the API (422 with field paths); documents from a newer schema version are refused. Switching an entry to
+the builder without a document converts its rich-text body into a text widget; the body is kept. Saving a new or
+changed `html` widget needs `content.embed_html` (403 otherwise); images must exist in the media library.
+
+In entry responses of the Delivery API, builder entries carry `builder` (with `html` widget code removed),
+`builderCss` (compiled from the typed styles), `posts` (cards for `posts` widgets, keyed by widget id) and
+`shortcodes` (resolved data for dynamic shortcodes, keyed by the shortcode's text).
+
+**Shortcodes (M5).** Rich text and builder text/shortcode widgets may contain WordPress-style shortcodes:
+`[button text="…" url="…"]`, `[recent_posts count="3" type="post" category="…"]`, `[gallery ids="…" columns="3"]`,
+`[video youtube="…"]` / `[video vimeo="…"]`, `[site_name]` and `[year]`. Only these registered names exist; attributes
+are validated against each shortcode's schema. Unknown or invalid shortcodes are shown as literal text; `[[name]]`
+shows `[name]`. Dynamic shortcodes are resolved by the Delivery API from publicly visible content only (at most 20
+dynamic shortcodes and `posts` widgets per entry).

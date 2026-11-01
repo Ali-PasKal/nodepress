@@ -1,9 +1,11 @@
 import {
   API_V1_BASE_PATH,
+  deliveryEmbedSchema,
   deliveryFeedSchema,
   deliveryPageSchema,
   deliverySiteSchema,
   deliverySitemapSchema,
+  type DeliveryEmbed,
   type DeliveryFeed,
   type DeliveryPage,
   type DeliverySite,
@@ -28,6 +30,10 @@ export interface DeliveryClient {
   site(): Promise<DeliverySite>;
   sitemap(): Promise<DeliverySitemap>;
   feed(): Promise<DeliveryFeed>;
+  /** HTML of an embed widget on a public entry; null when there is none. */
+  embed(entryId: string, widgetId: string): Promise<DeliveryEmbed | null>;
+  /** HTML of an embed widget on the entry a preview token names; null when invalid. */
+  previewEmbed(token: string, widgetId: string): Promise<DeliveryEmbed | null>;
 }
 
 /**
@@ -87,5 +93,19 @@ export function createDeliveryClient(baseUrl: string, timeoutMs: number): Delive
     site: () => get('/site', deliverySiteSchema),
     sitemap: () => get('/sitemap', deliverySitemapSchema),
     feed: () => get('/feed', deliveryFeedSchema),
+    embed: (entryId, widgetId) =>
+      get(
+        `/embed/${encodeURIComponent(entryId)}/${encodeURIComponent(widgetId)}`,
+        deliveryEmbedSchema,
+        {
+          notFoundAsNull: true,
+        },
+      ),
+    previewEmbed: (token, widgetId) =>
+      get(
+        `/preview/${encodeURIComponent(token)}/embed/${encodeURIComponent(widgetId)}`,
+        deliveryEmbedSchema,
+        { notFoundAsNull: true },
+      ),
   };
 }

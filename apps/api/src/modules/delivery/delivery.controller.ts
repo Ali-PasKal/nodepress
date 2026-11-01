@@ -1,11 +1,13 @@
 import { Controller, Get, Header, Param, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  deliveryEmbedSchema,
   deliveryFeedSchema,
   deliveryPageQuerySchema,
   deliveryPageSchema,
   deliverySiteSchema,
   deliverySitemapSchema,
+  type DeliveryEmbed,
   type DeliveryFeed,
   type DeliveryPage,
   type DeliverySite,
@@ -52,6 +54,31 @@ export class DeliveryController {
   @ApiOkResponse({ standardSchema: deliveryPageSchema })
   preview(@Param('token') token: string): Promise<DeliveryPage> {
     return this.delivery.preview(token);
+  }
+
+  @Get('preview/:token/embed/:widgetId')
+  @Header('Cache-Control', 'no-store')
+  @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({ summary: 'HTML of an embed widget on the entry named by a preview link' })
+  @ApiOkResponse({ standardSchema: deliveryEmbedSchema })
+  previewEmbed(
+    @Param('token') token: string,
+    @Param('widgetId') widgetId: string,
+  ): Promise<DeliveryEmbed> {
+    return this.delivery.previewEmbed(token, widgetId);
+  }
+
+  @Get('embed/:entryId/:widgetId')
+  @ApiOperation({
+    summary:
+      'HTML of an embed widget on a public entry (the site serves it in a sandboxed document)',
+  })
+  @ApiOkResponse({ standardSchema: deliveryEmbedSchema })
+  embed(
+    @Param('entryId') entryId: string,
+    @Param('widgetId') widgetId: string,
+  ): Promise<DeliveryEmbed> {
+    return this.delivery.embed(entryId, widgetId);
   }
 
   @Get('sitemap')

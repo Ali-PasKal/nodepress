@@ -244,6 +244,21 @@ a:hover {
   outline: none;
 }
 
+/* Builder pages: sections span the full width and bring their own spacing. */
+.nx-main-builder {
+  padding-block: 0;
+}
+
+/* The title lines up with boxed sections (same width and gutter). */
+.nx-entry-builder .nx-entry-header {
+  max-inline-size: calc(var(--nx-builder-width, 72rem) + 2rem);
+  padding-block: 2.5rem 1rem;
+}
+
+.nx-p {
+  margin-block: 0 1.25em;
+}
+
 h1,
 h2,
 h3,

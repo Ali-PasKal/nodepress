@@ -75,6 +75,7 @@ const MODEL = {
       hasBody: true,
       hasExcerpt: true,
       hasFeaturedImage: true,
+      hasBuilder: false,
       isSystem: true,
       routePrefix: '',
       isPublic: true,

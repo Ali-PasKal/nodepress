@@ -37,6 +37,23 @@ export const adminRoutes: RouteObject[] = [
     errorElement: <RouteErrorPage />,
   },
   {
+    // The visual builder is full screen (outside the admin layout).
+    path: '/content/:type/:id/builder',
+    errorElement: <RouteErrorPage />,
+    lazy: async () => {
+      const { BuilderPage } = await import('../features/builder/builder-page');
+      return {
+        element: (
+          <RequireAuth>
+            <RequireCapability capability={['content.create', 'content.edit_others']}>
+              <BuilderPage />
+            </RequireCapability>
+          </RequireAuth>
+        ),
+      };
+    },
+  },
+  {
     path: '/',
     element: (
       <RequireAuth>

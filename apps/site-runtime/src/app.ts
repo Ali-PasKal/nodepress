@@ -1,4 +1,5 @@
-import type { DeliveryPage, DeliveryRoute } from '@nexora/shared';
+import { createHash } from 'node:crypto';
+import type { DeliveryEmbed, DeliveryPage, DeliveryRoute } from '@nexora/shared';
 import { encodeSitePath, PREVIEW_TOKEN_PATTERN } from '@nexora/shared';
 import type { ThemeRenderContext, ThemeView } from '@nexora/theme-sdk';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
@@ -32,19 +33,32 @@ const IMMUTABLE = 'public, max-age=31536000, immutable';
  * JSON-LD blocks), styles only from this origin (theme variables are a stylesheet, not inline), images
  * from this origin, data URIs or https (media may be on a CDN), and the page cannot be framed elsewhere.
  */
-const CSP = {
-  useDefaults: false,
-  directives: {
-    defaultSrc: ["'none'"],
-    styleSrc: ["'self'"],
-    imgSrc: ["'self'", 'data:', 'https:'],
-    fontSrc: ["'self'"],
-    baseUri: ["'none'"],
-    formAction: ["'self'"],
-    frameAncestors: ["'self'"],
-    manifestSrc: ["'self'"],
-  },
-};
+export function contentSecurityPolicy(styleHashes: readonly string[] = []): string {
+  return [
+    "default-src 'none'",
+    `style-src 'self'${styleHashes.map((hash) => ` 'sha256-${hash}'`).join('')}`,
+    "img-src 'self' data: https:",
+    "font-src 'self'",
+    // Videos (privacy-enhanced players) and HTML embeds, which are sandboxed documents on this origin.
+    "frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+    "manifest-src 'self'",
+  ].join(';');
+}
+
+/**
+ * HTML embeds run third-party code, so their document gets an opaque origin (CSP sandbox): no access to this
+ * site's cookies, storage or pages, whether framed or opened directly.
+ */
+const EMBED_CSP = "sandbox allow-scripts allow-popups allow-forms; frame-ancestors 'self'";
+const ELEMENT_ID = /^[a-z0-9]{8}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function embedDocument(embed: DeliveryEmbed): string {
+  return `<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<meta name="robots" content="noindex">\n<title>${escapeHtml(embed.title)}</title>\n</head>\n<body style="margin:0">\n${embed.html}\n</body>\n</html>\n`;
+}
 
 /** Decodes a raw request path segment by segment; null when it is malformed. */
 export function decodePath(raw: string): string | null {
@@ -103,7 +117,8 @@ export function createSiteApp({ client, themes, logger }: SiteAppOptions): Expre
   app.set('trust proxy', false);
   app.use(
     helmet({
-      contentSecurityPolicy: CSP,
+      // Set below (and per page, when a page carries its compiled builder styles).
+      contentSecurityPolicy: false,
       // HSTS belongs to the TLS-terminating proxy, which knows whether the site is served over HTTPS.
       strictTransportSecurity: false,
       referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
@@ -111,10 +126,15 @@ export function createSiteApp({ client, themes, logger }: SiteAppOptions): Expre
       crossOriginResourcePolicy: { policy: 'same-origin' },
     }),
   );
+  app.use((_req, res, next) => {
+    res.setHeader('Content-Security-Policy', contentSecurityPolicy());
+    next();
+  });
   app.use((req, res, next) => {
     const started = process.hrtime.bigint();
     res.on('finish', () => {
       const path = req.path.startsWith('/_preview/') ? '/_preview/[redacted]' : req.path;
+
       logger.info(
         {
           method: req.method,
@@ -178,6 +198,44 @@ export function createSiteApp({ client, themes, logger }: SiteAppOptions): Expre
       .send('Not found');
   });
 
+  app.get('/_embed/:entryId/:widgetId', async (req, res) => {
+    const { entryId, widgetId } = req.params;
+    const embed =
+      UUID.test(entryId) && ELEMENT_ID.test(widgetId)
+        ? await client.embed(entryId, widgetId)
+        : null;
+    res.set({
+      'Content-Security-Policy': EMBED_CSP,
+      'X-Robots-Tag': 'noindex',
+      'Referrer-Policy': 'no-referrer',
+      'Cache-Control': REVALIDATE,
+    });
+    if (!embed) {
+      res.status(404).type('text/plain').send('Not found');
+      return;
+    }
+    res.type('html').send(embedDocument(embed));
+  });
+
+  app.get('/_preview/:token/embed/:widgetId', async (req, res) => {
+    const { token, widgetId } = req.params;
+    const embed =
+      PREVIEW_TOKEN_PATTERN.test(token) && ELEMENT_ID.test(widgetId)
+        ? await client.previewEmbed(token, widgetId)
+        : null;
+    res.set({
+      'Content-Security-Policy': EMBED_CSP,
+      'X-Robots-Tag': 'noindex, nofollow',
+      'Referrer-Policy': 'no-referrer',
+      'Cache-Control': 'no-store',
+    });
+    if (!embed) {
+      res.status(404).type('text/plain').send('Not found');
+      return;
+    }
+    res.type('html').send(embedDocument(embed));
+  });
+
   app.get('/_preview/:token', async (req, res) => {
     res.set({
       'Cache-Control': 'no-store',
@@ -194,7 +252,7 @@ export function createSiteApp({ client, themes, logger }: SiteAppOptions): Expre
       return;
     }
     const path = page.route.kind === 'entry' ? page.route.entry.url : '/';
-    sendPage(res, page, path, 200);
+    sendPage(res, page, path, 200, `/_preview/${token}/embed`);
   });
 
   app.get('/{*path}', async (req, res) => {
@@ -219,14 +277,24 @@ export function createSiteApp({ client, themes, logger }: SiteAppOptions): Expre
     sendPage(res, result, decoded, result.route.kind === 'not_found' ? 404 : 200);
   });
 
-  function sendPage(res: Response, page: DeliveryPage, path: string, status: number): void {
+  function sendPage(
+    res: Response,
+    page: DeliveryPage,
+    path: string,
+    status: number,
+    embedBase?: string,
+  ): void {
     const route = page.route;
     if (route.kind === 'redirect') throw new Error('Redirects are not rendered.');
     const theme = themes.resolve(page.site.theme.key);
     const settings = themes.settingsFor(theme, page.site.theme.settings);
     const site = { ...page.site, theme: { ...page.site.theme, settings } };
     const view = toView(route);
+    const entry = view.kind === 'entry' ? view.entry : view.kind === 'home' ? view.entry : null;
+    const base = embedBase ?? (entry ? `/_embed/${entry.id}` : '/_embed/none');
+    const builderCss = entry?.editor === 'builder' ? entry.builderCss : '';
     const context: ThemeRenderContext = {
+      embedUrl: (widgetId) => `${base}/${widgetId}`,
       site,
       view,
       path,
@@ -240,9 +308,18 @@ export function createSiteApp({ client, themes, logger }: SiteAppOptions): Expre
       htmlAttributes: theme.module.htmlAttributes(settings),
       title: seo.title,
       head: seo.tags,
-      stylesheets: [theme.stylesheetHref, themes.variablesHref(theme, settings)],
+      stylesheets: [
+        themes.builderHref,
+        theme.stylesheetHref,
+        themes.variablesHref(theme, settings),
+      ],
+      inlineStyles: builderCss !== '' ? [builderCss] : [],
       body: renderToStaticMarkup(theme.module.render(context)),
     });
+    if (builderCss !== '') {
+      const digest = createHash('sha256').update(builderCss, 'utf8').digest('base64');
+      res.setHeader('Content-Security-Policy', contentSecurityPolicy([digest]));
+    }
     if (seo.noindex && !page.preview) res.set('X-Robots-Tag', 'noindex');
     if (!page.preview) res.set('Cache-Control', REVALIDATE);
     res.status(status).type('html').send(html);

@@ -55,6 +55,7 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
   - Implemented (M4): the Delivery API is the only public read path and every query goes through one "publicly visible" predicate (published, not trashed, publication time reached, public content type) plus a path-based ancestor check for hierarchical entries; tested per status, scheduling, trash, non-public types and unpublished ancestors, with a mutation check (removing any clause makes a test fail). Custom fields are only delivered when marked public (off by default); authors are exposed by display name only.
   - Implemented (M4): preview links are 256-bit random tokens stored as SHA-256, valid for one hour, invalid once the entry is trashed or the creator suspended; responses are `no-store`, `noindex, nofollow` and `Referrer-Policy: no-referrer`, and nginx keeps `/_preview/` out of its access log.
   - Implemented (M4): public pages are served with `default-src 'none'; style-src 'self'; img-src 'self' data: https:` and no script source at all (structured data uses non-executable JSON-LD blocks, escaped against `</script>`); React escapes all text; sitemap and RSS are XML-escaped; redirect targets are site paths or credential-free http(s) URLs.
+  - Implemented (M5): builder pages add exactly one inline stylesheet, allowed by its SHA-256 in the page CSP (no `unsafe-inline`, no nonce); its rules are compiled only from typed, re-checked values (hex colours, bounded integers, enums). Dynamic shortcodes and posts widgets are resolved from publicly visible content only (same predicate), at most 20 per entry; HTML embed code is never part of the page payload.
   - Planned (M7): form spam mitigation (honeypot + rate limits + optional challenge), server-side validation.
 
 ### 3.2 Authenticated content editors (Author, Contributor, Editor)
@@ -63,7 +64,8 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
   - Implemented (M2): capability-based authorisation on every route via a global, fail-closed guard (a route without a declared policy is refused, and a test inventories every route); privilege-escalation rules (no granting unheld capabilities, no managing more privileged users, no self role/status changes, no editing one's own role, last active Super Administrator protected); role and status changes revoke the target's sessions; append-only audit log.
   - Implemented (M3): one content policy for own vs. others' entries, live content and publishing rights, tested for every built-in role (including a mutation check that the tests catch a weakened rule); entries a user may not see return 404.
   - Implemented (M3): rich text is stored as ProseMirror JSON validated against an allowlist (no HTML, no unknown nodes or marks, link targets limited to http(s)/mailto/tel/same-site, images limited to `/uploads/` or http(s)); nesting depth is checked before parsing; the admin renders stored content as React elements, re-checking URLs.
-  - Implemented (M4): the public renderer (theme SDK) emits only the allowlisted rich-text constructs as React elements and re-checks link and image URLs; the public pages' CSP allows no scripts, so injected markup cannot execute. Planned (M5): HTML Embed in a sandboxed `iframe` without `allow-same-origin`.
+  - Implemented (M4): the public renderer (theme SDK) emits only the allowlisted rich-text constructs as React elements and re-checks link and image URLs; the public pages' CSP allows no scripts, so injected markup cannot execute.
+  - Implemented (M5): builder documents are validated by one closed schema in the admin and the API (fixed depth, size and count limits, unknown widgets and properties rejected, URLs checked as in rich text, styles typed — never raw CSS). Shortcodes are a registry of typed definitions rendered as React elements: nothing is evaluated, attributes are schema-validated (URLs, ids, enums, bounded numbers), and unknown or invalid shortcodes stay literal text. HTML embeds need the `content.embed_html` capability (administrator, editor; changes to existing embeds are checked too) and run only in a document served with `Content-Security-Policy: sandbox allow-scripts allow-popups allow-forms` — an opaque origin with no access to the site's or the admin's cookies, storage or DOM, also when the embed URL is opened directly. The admin never renders embed code (the canvas shows a placeholder).
   - Implemented (M1): admin CSP has `script-src 'self'` with no inline scripts (enforced by an E2E test that fails on any CSP violation).
 
 ### 3.3 Administrators
@@ -141,6 +143,10 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 | Public pages: CSP without scripts or inline styles, escaped head/JSON-LD/XML, ETags, 503 on API outage | Implemented (M4) | `apps/site-runtime/src/{app,html,seo,xml,themes}.ts`; `app.test.ts`, E2E `public-site.spec.ts` |
 | Reserved paths and route prefix collisions; redirect source/target validation; loop detection | Implemented (M4) | `content-model.service.ts`, `entries.service.ts`, `redirects.service.ts`, shared `redirects.ts`; `routes-redirects.test.ts` |
 | Theme settings validated against the theme manifest (CSS variable values re-validated by the runtime) | Implemented (M4) | shared `themes.ts`, `site-settings.service.ts`, runtime `themes.ts`; `appearance.test.ts`, `app.test.ts` |
+| Builder document schema (closed widget set, typed styles, limits, newer versions refused) shared by admin and API | Implemented (M5) | shared `builder.ts`; `builder.test.ts` (hostile documents), API `builder.test.ts`, admin `document-ops.test.ts` |
+| Builder CSS compiled from re-checked typed values; inline style allowed only by SHA-256 in the CSP | Implemented (M5) | shared `compileBuilderCss`; runtime `app.ts`, `html.ts`; `builder.test.ts`, runtime `app.test.ts`, E2E `builder.spec.ts` (no CSP violations) |
+| Shortcodes: bounded linear parser, typed registry, server-side resolution from public content, literal fallback | Implemented (M5) | shared `shortcodes.ts`, `delivery.service.ts`, theme-sdk `shortcodes.tsx`; `builder.test.ts`, API `builder.test.ts`, `theme-sdk.test.tsx`, E2E |
+| HTML embeds: capability-gated, opaque-origin CSP sandbox, never in page payloads or the admin | Implemented (M5) | `entries.service.ts`, `delivery.service.ts`, runtime `app.ts`; API `builder.test.ts`, runtime `app.test.ts`, E2E `builder.spec.ts` (parent and cookie access blocked) |
 | Plugin isolation | Planned (M6) | — |
 
 ## 5. Design decisions with security impact
@@ -150,7 +156,7 @@ Admin (`/admin/`), API (`/api/`) and the public site share one origin, which kee
 and removes CORS entirely. The trade-off (risk **R-03**): script running on the public site would run in the
 admin's origin. Since M4 the public pages' CSP contains no script source at all (`default-src 'none'`), so even
 injected markup cannot execute script; content is stored as allowlisted JSON (never HTML), themes are
-first-party code, and HTML embeds (M5) will be sandboxed in iframes. A separate admin origin is supported (via
+first-party code, and HTML embeds (M5) run in documents with an opaque origin (CSP `sandbox`). A separate admin origin is supported (via
 `CORS_ALLOWED_ORIGINS`) and recommended for high-value sites.
 
 ### 5.2 Readiness is public, but minimal and rate-coalesced
@@ -193,6 +199,9 @@ administrator approval). The UI and documentation must never present trusted plu
 | R-20 | A preview link is a bearer secret: anyone holding it can read that draft for up to an hour; links cannot be revoked one by one | Accepted; short lifetime, hashed at rest, no referrer, no caching, noindex; trashing the entry or suspending the creator invalidates it |
 | R-21 | Users with `seo.manage` (or `appearance.manage` for menus) can send visitors to external http(s) sites | Accepted (authorised users only, as in other CMSs); `javascript:`, `data:`, protocol-relative and credential-bearing URLs are rejected |
 | R-22 | Root pages created before M4 whose slug equals a route prefix (e.g. a page called "blog") are shadowed by that section | Accepted; documented in the M4 notes; new pages and prefixes are validated so this cannot be created anymore |
+| R-23 | Users with `content.embed_html` can put arbitrary third-party code on public pages; inside its sandbox it can show popups, submit forms anywhere, load remote resources and track visitors (e.g. a fake sign-in form) | Accepted (needed for maps, booking and analytics snippets): capability limited to administrators and editors by default, opaque origin (no access to the site, the admin or cookies), popups stay sandboxed, embed URLs are `noindex` and sent without referrer |
+| R-24 | Builder styles let authors change the look of their own pages freely within typed values (e.g. hide elements, low-contrast colours) | Accepted; values cannot leave the element's scope or inject CSS, and editors review content through the existing publishing rights |
+| R-25 | Dynamic shortcodes and posts widgets add queries to a page view (up to 20 per entry, each bounded: 12 items per shortcode, 24 per posts widget, 24 gallery images) | Open with R-19 (page caching in M7); limits are enforced by the schema and the Delivery API |
 
 ## 7. Security checklist (per change)
 

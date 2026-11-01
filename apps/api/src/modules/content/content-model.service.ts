@@ -45,6 +45,7 @@ export interface ContentTypeDefinition {
   readonly hasBody: boolean;
   readonly hasExcerpt: boolean;
   readonly hasFeaturedImage: boolean;
+  readonly hasBuilder: boolean;
   readonly fields: readonly FieldDefinition[];
   readonly taxonomyIds: readonly string[];
   /** "" for root types (pages). */
@@ -92,6 +93,7 @@ function toContentType(row: ContentTypeRow): ContentTypeInfo {
     hasBody: row.hasBody,
     hasExcerpt: row.hasExcerpt,
     hasFeaturedImage: row.hasFeaturedImage,
+    hasBuilder: row.hasBuilder,
     isSystem: row.isSystem,
     routePrefix: row.routePrefix,
     isPublic: row.isPublic,
@@ -169,6 +171,7 @@ export class ContentModelService {
       hasBody: row.hasBody,
       hasExcerpt: row.hasExcerpt,
       hasFeaturedImage: row.hasFeaturedImage,
+      hasBuilder: row.hasBuilder,
       fields: parseFields(row.fields),
       taxonomyIds: row.taxonomies.map((link) => link.taxonomyId),
       routePrefix: row.routePrefix,
@@ -288,6 +291,7 @@ export class ContentModelService {
             hasBody: input.hasBody,
             hasExcerpt: input.hasExcerpt,
             hasFeaturedImage: input.hasFeaturedImage,
+            hasBuilder: input.hasBuilder,
             fields: input.fields,
             taxonomies: { create: input.taxonomyIds.map((taxonomyId) => ({ taxonomyId })) },
           },
@@ -370,6 +374,7 @@ export class ContentModelService {
             ...(input.hasFeaturedImage !== undefined
               ? { hasFeaturedImage: input.hasFeaturedImage }
               : {}),
+            ...(input.hasBuilder !== undefined ? { hasBuilder: input.hasBuilder } : {}),
             ...(input.fields !== undefined ? { fields: input.fields } : {}),
           },
         });

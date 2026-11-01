@@ -1,0 +1,201 @@
+/* Editor chrome around the canvas (outlines, handles, drop zones). The page itself uses builder.css. */
+.nx-canvas-scroll {
+  min-block-size: 100%;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.nx-canvas-frame {
+  max-inline-size: 100%;
+  margin-inline: auto;
+  min-block-size: 20rem;
+  /* The canvas shows the page like the public site's default (light) theme, whatever the admin theme is. */
+  background: #ffffff;
+  color: #1b1f24;
+  color-scheme: light;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Noto Sans',
+    Tahoma,
+    sans-serif;
+  line-height: 1.6;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  transition: width 150ms ease;
+  --nx-accent: #1d4ed8;
+  --nx-fg: #1b1f24;
+  --nx-bg: #ffffff;
+}
+
+/*
+ * The admin's CSS reset removes browser defaults that public themes rely on (heading sizes, list markers,
+ * link colours). Restore them inside the canvas only, with zero specificity so builder styles still win.
+ */
+:where(.nx-canvas-frame) :where(h1, h2, h3, h4, h5, h6) {
+  font-weight: 700;
+  line-height: 1.25;
+}
+:where(.nx-canvas-frame) :where(h1) {
+  font-size: 2em;
+}
+:where(.nx-canvas-frame) :where(h2) {
+  font-size: 1.5em;
+}
+:where(.nx-canvas-frame) :where(h3) {
+  font-size: 1.17em;
+}
+:where(.nx-canvas-frame) :where(h5) {
+  font-size: 0.83em;
+}
+:where(.nx-canvas-frame) :where(h6) {
+  font-size: 0.67em;
+}
+:where(.nx-canvas-frame) :where(.nx-prose) :where(h1, h2, h3, h4, h5, h6) {
+  margin-block: 1.8em 0.6em;
+}
+:where(.nx-canvas-frame) :where(.nx-prose) :where(p, ul, ol, blockquote, pre, figure) {
+  margin-block: 0 1.25em;
+}
+:where(.nx-canvas-frame) :where(.nx-prose) > :where(:first-child) {
+  margin-block-start: 0;
+}
+:where(.nx-canvas-frame) :where(ul) {
+  list-style: disc;
+  padding-inline-start: 1.5em;
+}
+:where(.nx-canvas-frame) :where(ol) {
+  list-style: decimal;
+  padding-inline-start: 1.5em;
+}
+:where(.nx-canvas-frame) :where(a) {
+  color: var(--nx-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+:where(.nx-canvas-frame) :where(.nx-prose blockquote) {
+  padding-inline-start: 1rem;
+  border-inline-start: 4px solid var(--nx-accent);
+  color: #5b636e;
+}
+
+.nx-canvas-el {
+  position: relative;
+  outline-offset: -1px;
+}
+
+.nx-canvas-el:hover {
+  outline: 1px dashed var(--color-primary, #1d4ed8);
+}
+
+.nx-canvas-el.is-selected {
+  outline: 2px solid var(--color-primary, #1d4ed8);
+}
+
+.nx-canvas-el:focus-visible {
+  outline: 2px solid var(--color-ring, #1d4ed8);
+}
+
+.nx-canvas-el.is-dragging {
+  opacity: 0.5;
+  z-index: 10;
+}
+
+.nx-canvas-column {
+  min-block-size: 3rem;
+}
+
+.nx-canvas-column.is-over {
+  background: color-mix(in oklab, var(--color-primary, #1d4ed8) 8%, transparent);
+}
+
+.nx-canvas-widget {
+  cursor: grab;
+}
+
+.nx-canvas-widget + .nx-canvas-widget > .nx-w {
+  margin-block-start: 1rem;
+}
+
+.nx-canvas-widget a {
+  pointer-events: none;
+}
+
+.nx-canvas-tag {
+  position: absolute;
+  inset-block-start: -1.4rem;
+  inset-inline-start: 0;
+  display: none;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  background: var(--color-primary, #1d4ed8);
+  color: var(--color-primary-foreground, #ffffff);
+  font-size: 0.7rem;
+  z-index: 5;
+}
+
+.nx-canvas-widget.is-selected > .nx-canvas-tag,
+.nx-canvas-widget:hover > .nx-canvas-tag {
+  display: block;
+}
+
+.nx-canvas-handle {
+  position: absolute;
+  inset-block-start: 0.25rem;
+  inset-inline-start: 0.25rem;
+  z-index: 6;
+  display: none;
+  padding: 0.15rem;
+  border-radius: 0.25rem;
+  background: var(--color-primary, #1d4ed8);
+  color: var(--color-primary-foreground, #ffffff);
+  cursor: grab;
+}
+
+.nx-canvas-handle svg {
+  inline-size: 1rem;
+  block-size: 1rem;
+}
+
+.nx-canvas-section:hover > .nx-canvas-handle,
+.nx-canvas-section.is-selected > .nx-canvas-handle,
+.nx-canvas-handle:focus-visible {
+  display: block;
+}
+
+.nx-canvas-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 3rem;
+  border: 2px dashed var(--color-border, #d1d5db);
+  border-radius: 0.375rem;
+  color: var(--color-muted-foreground, #6b7280);
+  font-size: 0.8rem;
+}
+
+.nx-canvas-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 1.5rem 1rem;
+  padding: 1rem;
+  border: 2px dashed var(--color-border, #d1d5db);
+  border-radius: 0.5rem;
+  color: var(--color-muted-foreground, #6b7280);
+}
+
+.nx-canvas-add button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 0.375rem;
+  background: var(--color-surface, #ffffff);
+  font-size: 0.8rem;
+}
+
+.nx-canvas-add button:hover {
+  background: var(--color-muted, #f3f4f6);
+}

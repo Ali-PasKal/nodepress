@@ -1,5 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { resolveThemeSettings, themeManifestSchema, type DeliverySite } from '@nexora/shared';
+import {
+  createSection,
+  createWidget,
+  resolveThemeSettings,
+  themeManifestSchema,
+  type DeliverySite,
+} from '@nexora/shared';
 import type { ThemeRenderContext, ThemeView } from '@nexora/theme-sdk';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -28,6 +34,7 @@ function render(view: ThemeView, overrides: Partial<ThemeRenderContext> = {}): s
       path: '/',
       preview: false,
       pageUrl: (page) => `/?page=${String(page)}`,
+      embedUrl: (id) => `/_embed/entry/${id}`,
       ...overrides,
     }),
   );
@@ -87,10 +94,60 @@ describe('starter theme', () => {
         path: '/x',
         preview: false,
         pageUrl: () => '/',
+        embedUrl: () => '/',
       }),
     );
     expect(html).not.toContain('nx-tagline');
     expect(html).toContain('صفحه پیدا نشد');
+  });
+
+  it('renders builder pages full width with widgets, shortcodes and sandboxed embeds', () => {
+    const heading = createWidget('heading');
+    heading.props.text = 'Big headline';
+    const text = createWidget('text');
+    text.props.content = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'Hello [site_name] [nope]' }] },
+      ],
+    };
+    const embed = createWidget('html');
+    const section = createSection([50, 50]);
+    section.children[0]!.children.push(heading, text);
+    section.children[1]!.children.push(embed);
+    const entry = {
+      id: '0191a0b0-0000-7000-8000-0000000000aa',
+      type: 'page',
+      title: 'Landing',
+      url: '/landing',
+      summary: '',
+      publishedAt: '2026-10-01T10:00:00.000Z',
+      updatedAt: '2026-10-01T10:00:00.000Z',
+      author: { displayName: 'A' },
+      featuredMedia: null,
+      terms: [],
+      contentType: { key: 'page', name: 'Page', pluralName: 'Pages', hierarchical: true },
+      slug: 'landing',
+      canonicalUrl: 'https://example.test/landing',
+      excerpt: '',
+      body: { type: 'doc' as const, content: [] },
+      fields: [],
+      media: {},
+      seo: { title: '', description: '', noindex: false },
+      editor: 'builder' as const,
+      builder: { schemaVersion: 1 as const, settings: { hideTitle: true }, sections: [section] },
+      builderCss: '',
+      shortcodes: {},
+      posts: {},
+    };
+    const html = render({ kind: 'entry', entry }, { path: '/landing' });
+    expect(html).toContain('<main id="content" class="nx-main nx-main-builder"');
+    expect(html).not.toContain('nx-entry-title');
+    expect(html).toContain(`<h2 class="nx-w nx-w-heading nx-el-${heading.id}">Big headline</h2>`);
+    expect(html).toContain('Hello Site [nope]');
+    expect(html).toContain(`src="/_embed/entry/${embed.id}"`);
+    expect(html).toContain('sandbox="allow-scripts allow-popups allow-forms"');
+    expect(html).toContain(`class="nx-b-section nx-b-boxed nx-el-${section.id}"`);
   });
 
   it('uses logical CSS properties only (right-to-left support)', () => {

@@ -31,8 +31,12 @@ RUN --mount=type=secret,id=extra_ca,required=false \
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY packages/ui packages/ui
+# The visual builder renders the canvas with the theme SDK's components and CSS.
+COPY packages/theme-sdk packages/theme-sdk
 COPY apps/admin apps/admin
-RUN pnpm --filter @nexora/shared run build && pnpm --filter @nexora/admin run build
+RUN pnpm --filter @nexora/shared run build \
+    && pnpm --filter @nexora/theme-sdk run build \
+    && pnpm --filter @nexora/admin run build
 
 FROM ${NGINX_IMAGE} AS runtime
 COPY infrastructure/docker/admin/nginx.conf /etc/nginx/conf.d/default.conf

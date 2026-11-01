@@ -3,12 +3,11 @@
 An extensible, self-hostable content management system and visual website builder, built with
 TypeScript, NestJS, PostgreSQL and React.
 
-> **Status: Milestone 4 of 8 (public site, themes and Delivery API).** The foundation, identity and access
-> control, the content model, the media library, a durable job queue, and now the **public website** are in
-> place: published content is rendered by a starter theme, with menus, SEO tags, sitemap, RSS, redirects and
-> private preview links. The visual page builder (M5) and plugins (M6) are **not implemented yet**; pages use the
-> rich-text editor. See [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for exactly what works and
-> what does not.
+> **Status: Milestone 5 of 8 (visual builder and shortcodes).** The foundation, identity and access control, the
+> content model, the media library, a durable job queue, the public website, and now a **visual page builder** are
+> in place: pages can be laid out with sections, columns and widgets (drag and drop, responsive styles, undo/redo),
+> and WordPress-style **shortcodes** work in any content. Plugins (M6) are **not implemented yet**. See
+> [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for exactly what works and what does not.
 
 ## What exists today
 
@@ -33,6 +32,17 @@ TypeScript, NestJS, PostgreSQL and React.
   with validated theme settings; menus; titles, descriptions, canonical URLs, Open Graph, JSON-LD, `sitemap.xml`,
   `robots.txt` and RSS; automatic and manual redirects; one-hour private preview links; a Content Security Policy
   that allows no scripts at all.
+- **Visual builder** (M5): a full-screen editor for pages (and any content type that opts in) with sections,
+  columns and widgets — heading, text, image, button, spacer, divider, video, posts, shortcode and HTML embed —
+  drag and drop (mouse, touch, keyboard), a navigator, per-device styles (desktop, tablet, mobile) with a device
+  preview, undo/redo, revisions, publishing and preview links. The canvas uses the same components and CSS as the
+  public site. Documents are typed JSON validated in the browser and the API; styles are typed values compiled to
+  scoped CSS, allowed on the site by a CSP hash. HTML embeds run in a sandboxed origin and need their own
+  capability.
+- **Shortcodes** (M5): `[button]`, `[recent_posts]`, `[gallery]`, `[video]`, `[site_name]` and `[year]` in posts,
+  pages and builder widgets, with attributes validated per shortcode and dynamic data resolved on the server from
+  published content only. Unknown or invalid shortcodes stay visible as text (as in WordPress) and are flagged in
+  the editor; `[[name]]` writes a literal `[name]`. Nothing is executed.
 - **Admin** (`apps/admin`, React 19 + Vite 8 + Tailwind 4): dashboard, setup, sign-in, users, roles, audit log,
   profile, content lists and editor (with SEO panel, view and preview), media library, terms, content type builder,
   appearance (site identity, reading, theme settings), menus, SEO and redirects, background jobs, command palette

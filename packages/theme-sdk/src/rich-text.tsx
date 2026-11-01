@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from 'react';
 import { linkAttributes } from './helpers.js';
 import { ResponsiveImage } from './image.js';
+import { hasBlockShortcode, ShortcodeText, type ShortcodeContext } from './shortcodes.js';
 
 /**
  * Renders a stored rich-text document as React elements. No HTML strings are involved: React escapes
@@ -17,6 +18,7 @@ import { ResponsiveImage } from './image.js';
 interface RenderOptions {
   readonly media: Readonly<Record<string, DeliveryMedia>>;
   readonly imageSizes: string;
+  readonly shortcodes: ShortcodeContext | undefined;
 }
 
 function renderMarks(
@@ -69,12 +71,32 @@ function renderNode(
   key: string,
   options: RenderOptions,
 ): ReactNode {
-  if (node.type === 'text') return renderMarks(node.text, node.marks, key);
+  if (node.type === 'text') {
+    const text = options.shortcodes ? (
+      <ShortcodeText text={node.text} context={options.shortcodes} />
+    ) : (
+      node.text
+    );
+    return renderMarks(text, node.marks, key);
+  }
   if (node.type === 'hardBreak') return <br key={key} />;
   const attrs = node.attrs ?? {};
   switch (node.type) {
-    case 'paragraph':
-      return <p key={key}>{renderChildren(node.content, key, options)}</p>;
+    case 'paragraph': {
+      // Block-level shortcodes (lists, galleries, videos) cannot live inside <p>.
+      const block =
+        options.shortcodes !== undefined &&
+        (node.content ?? []).some(
+          (child) => child.type === 'text' && hasBlockShortcode(child.text),
+        );
+      return block ? (
+        <div key={key} className="nx-p">
+          {renderChildren(node.content, key, options)}
+        </div>
+      ) : (
+        <p key={key}>{renderChildren(node.content, key, options)}</p>
+      );
+    }
     case 'heading': {
       const level = Number(attrs.level);
       const Tag =
@@ -148,10 +170,18 @@ export interface RichTextProps {
   /** `sizes` for images in the body. */
   imageSizes?: string;
   className?: string;
+  /** When given, registered shortcodes in text are rendered; otherwise text stays literal. */
+  shortcodes?: ShortcodeContext;
 }
 
-export function RichText({ document, media = {}, imageSizes = '100vw', className }: RichTextProps) {
-  const options: RenderOptions = { media, imageSizes };
+export function RichText({
+  document,
+  media = {},
+  imageSizes = '100vw',
+  className,
+  shortcodes,
+}: RichTextProps) {
+  const options: RenderOptions = { media, imageSizes, shortcodes };
   return (
     <div className={className}>
       {document.content.map((node, index) => renderNode(node, String(index), options))}

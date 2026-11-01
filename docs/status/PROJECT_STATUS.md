@@ -9,7 +9,7 @@ results that were actually observed.
 | **M2** | Authentication, sessions, users, roles and capabilities, audit log, setup wizard, security foundations | **Complete** (see results and caveats below) |
 | **M3** | Pages, posts, content types, taxonomies, revisions, media library, job queue | **Complete** (see results and caveats below) |
 | **M4** | Theme engine, public site runtime, starter theme, templates, SEO fundamentals, Delivery API | **Complete** (see results and caveats below) |
-| M5 | Visual editor: document schema, widget registry, canvas, drag and drop, undo/redo, responsive controls | Not started |
+| **M5** | Visual builder: document schema, widgets, canvas, drag and drop, undo/redo, responsive styles; shortcodes; sandboxed HTML embeds | **Complete** (see results and caveats below) |
 | M6 | Plugin SDK, lifecycle, extension permissions, example and default plugins | Not started |
 | M7 | Additional themes, forms, WordPress import, performance | Not started |
 | M8 | E2E coverage, security review, backup restore testing, deployment hardening, release | Not started |
@@ -501,18 +501,130 @@ reduced: the public pages cannot run scripts at all.
 
 ---
 
-## Next: Milestone 5 — Visual editor
+## Milestone 5 — Visual builder and shortcodes
+
+Plan, scope and decisions: [`docs/milestones/m5-visual-builder.md`](../milestones/m5-visual-builder.md).
+
+### Starting point
+M4 rendered published content with the starter theme, but every entry was a single rich-text document: no way to
+lay out a page (sections, columns, buttons and images side by side) and no way to place dynamic content (latest
+posts, galleries) inside text.
+
+### What was built
+- **Builder documents** (`packages/shared/src/contracts/builder.ts`): typed, versioned JSON — sections (boxed or
+  full width) → columns (width per breakpoint, vertical alignment) → widgets: heading, text (rich text), image,
+  button, spacer, divider, video (YouTube/Vimeo privacy-enhanced), posts, shortcode, HTML embed. Every element has
+  typed styles per breakpoint (spacing, colours, alignment, font size, radius, max width, min height, hide on
+  device). One schema validates in the browser and the API with limits; `schemaVersion` with an upgrade function;
+  newer versions refused.
+- **CSS compiler**: `compileBuilderCss` turns typed values into rules scoped by element id, tablet/mobile
+  overrides as container queries (each breakpoint inherits from the larger one); values are re-checked before they
+  reach CSS.
+- **Shortcodes** (`shortcodes.ts`): WordPress syntax `[name attr="value"]` in rich text (posts, pages) and builder
+  text/shortcode widgets; registry of typed definitions — `button`, `recent_posts`, `gallery`, `video`,
+  `site_name`, `year`; bounded linear parser; unknown or invalid shortcodes stay literal text and are flagged in the
+  editor; `[[name]]` writes `[name]`. Dynamic shortcodes are resolved by the Delivery API; nothing is executed.
+- **API**: `entries.editor` and `entries.builder` (migration with CHECK constraints), `content_types.has_builder`
+  (on for pages); switching to the builder converts the rich-text body into a text widget (the body is kept);
+  revisions and restore include builder documents; admin search covers builder text; new capability
+  `content.embed_html` (administrator, editor) required to add or change HTML embeds; builder images must exist in
+  the media library. Delivery API: compiled `builderCss`, resolved `shortcodes` and `posts` (public content only,
+  at most 20 dynamic items per entry), embed code removed from page payloads and served by
+  `GET /delivery/embed/{entryId}/{widgetId}` and the preview equivalent.
+- **Theme SDK and starter theme**: React renderers for builder documents and shortcodes, `builder.css`
+  (layout, buttons, video ratios, posts grid, gallery, responsive rules); builder pages render full width with the
+  title aligned to boxed sections (or hidden by a page setting); block shortcodes inside paragraphs render without
+  invalid markup.
+- **Site runtime**: the page's builder CSS is sent inline and allowed by its SHA-256 in the CSP
+  (`style-src 'self' 'sha256-…'`, no `unsafe-inline`, no nonce, so ETags stay stable); HTML embeds at
+  `/_embed/{entryId}/{widgetId}` (and `/_preview/{token}/embed/{widgetId}`) with
+  `Content-Security-Policy: sandbox allow-scripts allow-popups allow-forms` — an opaque origin.
+- **Admin builder** (`apps/admin/src/features/builder`, lazy chunk of 29 kB gzip): full-screen editor with widget
+  library, canvas rendered by the same components and CSS as the site, navigator, properties panel (content,
+  per-device style form showing inherited values, page settings), drag and drop with `@dnd-kit` (from the library,
+  between columns, sections by handle; pointer, touch and keyboard sensors; plus move up/down buttons), duplicate,
+  delete, column count and widths, device preview (desktop/tablet/mobile), undo/redo (Ctrl+Z / Ctrl+Shift+Z; typing
+  in one field merges into one step), unsaved-changes protection, save/publish with version checks, preview links.
+  The entry editor links to the builder, content types get a "Visual builder" switch, and the revisions dialog
+  summarises builder revisions.
+- **OpenAPI**: large shared schemas are now hoisted into named components (`BuilderDocument`, `EntryDetail`,
+  `DeliveryPage`, …) instead of being repeated per operation; the document shrank from 3.6 MB (with builder
+  schemas inlined) to 0.36 MB, smaller than at M4 (0.69 MB).
+- **Fixes found on the way**: adding a section from the canvas cleared the selection (the click reached the canvas
+  background), so the next widget landed in the wrong section — found by E2E, fixed, covered by an RTL test; the
+  canvas lost heading sizes and list markers to the admin's CSS reset — restored inside the canvas only; the admin
+  image did not contain the theme SDK the builder now uses (the image build failed) — found by rebuilding the
+  images, fixed in `admin.Dockerfile`; the revisions dialog showed the stale rich-text body for builder revisions —
+  it now summarises the layout.
+
+### Acceptance criteria and results
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Builder documents validated identically in browser and API; hostile documents rejected with field paths; newer schema versions refused | ✅ shared `builder.test.ts` (structure, limits, widget properties, styles, hostile URLs and CSS values, version handling); API `builder.test.ts` (422 with paths, opt-in per content type) |
+| 2 | Shortcodes: parsing, validation, server-side resolution in rich text and builder widgets; hostile attributes cannot produce unsafe output | ✅ shared `builder.test.ts` (attributes, quoting, escapes, unknown names, limits, `javascript:` URLs), theme-sdk tests, API `builder.test.ts` (resolution), E2E (rich-text post with `[site_name]`, `[year]`, `[button]`, `[recent_posts]`, an unknown `[script]` and an escaped `[[year]]`; no script elements) |
+| 3 | The editor builds a page (add, drag and drop, reorder, columns, properties, per-breakpoint styles, hide per device, undo/redo, duplicate, delete) and saves with version checks and revisions | ✅ admin `document-ops.test.ts` (15 tests: immutability, insert/move/duplicate/remove, column counts, responsive styles, history merge), `builder-page.test.tsx` (save payload, undo/redo, publish, capability, not-found); E2E on 1280/768/375 px (click-to-add, a pointer drag from the library on desktop, per-device font size, publish, revisions) |
+| 4 | Site and previews render builder pages like the canvas, responsive at 375/768/1280, CSP allows the style by hash, no violations | ✅ runtime `app.test.ts` (builder page, CSP hash matches the inline style, embed routes); E2E: columns side by side at 1280/768 and stacked at 375, 48 px / 28 px heading per device, `style-src 'self' 'sha256-…'` without `unsafe-inline`, 0 CSP violations, no horizontal overflow |
+| 5 | Dynamic widgets and shortcodes show only publicly visible content | ✅ API `builder.test.ts` (drafts excluded from posts widgets and `[recent_posts]`, gallery limited to images) |
+| 6 | HTML embeds run only in a sandboxed opaque origin and can only be saved with `content.embed_html` | ✅ API `builder.test.ts` (403 without the capability, also for changing an existing embed; code absent from page payloads); runtime `app.test.ts`; E2E: the embed's script cannot read `parent.document` or `document.cookie`, the embed URL carries the sandbox CSP |
+| 7 | All checks on Node 22 and 23.7; CI green | ✅ local (below); CI: see the note under "Known limitations" |
+
+### Verification run (2026-11-01)
+
+Local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.0, Docker 29.
+
+| Command | Result |
+|---|---|
+| `pnpm run lint` / `format:check` / `typecheck` / `build` | all exit 0 |
+| `pnpm --filter @nexora/admin run size` | exit 0 — initial JS 214.2 kB gzip (budget 215 kB), CSS 9.4 kB (budget 12 kB); the builder is a separate lazy chunk |
+| `pnpm run test` (with Redis and S3) | exit 0 — shared 59 · ui 7 · cli 21 · theme-sdk 8 · theme-starter 7 · site-runtime 16 · admin 84 · api 252 (**454 passed**) |
+| `pnpm --filter @nexora/api run db:check-drift` | "No difference detected." |
+| `pnpm audit --prod` | "No known vulnerabilities found" (new runtime dependencies: `@dnd-kit/core` 6.3.1, `@dnd-kit/sortable` 10.0.0, `@dnd-kit/utilities` 3.2.2) |
+| `pnpm run test:e2e` | exit 0 — **109 passed** (setup + 36 × 3 viewports; new: builder page, rich-text shortcodes, sandboxed embed); builder and content specs re-run after the last change: 40 passed |
+| Node 23.7.0, fresh copy of the tracked files (`git ls-files`): install, `typecheck`, `build`, `test` | all exit 0 — every suite passed (454 tests) |
+| `docker compose --profile app up` (production mode, rebuilt images) | all services healthy; through nginx: setup → builder page built in the admin (two columns, heading, button, `[recent_posts]`/`[year]`/`[site_name]`, HTML embed) and published → page 200 with `style-src 'self' 'sha256-…'` and no `unsafe-inline`, shortcodes resolved, the embed's script blocked from `parent.document`, embed URL with the `sandbox` CSP, conditional request 304, columns stacked at 375 px without horizontal overflow, 0 CSP violations in admin and site. Image sizes: api 840 MB, site 269 MB, admin 84 MB |
+
+### Known limitations and caveats (honest list)
+
+- **The canvas approximates the theme**: it uses the builder components and `builder.css`, but not the active
+  theme's stylesheet (that would bring site-wide rules into the admin); typography falls back to browser defaults.
+  The starter theme matches closely; other themes may look different on the site than in the canvas.
+- **Live data is not shown in the editor**: videos, HTML embeds, posts widgets and dynamic shortcodes appear as
+  labelled placeholders (the admin's CSP does not allow third-party frames, and drafts would otherwise leak into
+  previews of layout). Use the Preview button to see them.
+- **Fixed structure**: sections → columns → widgets; no nested sections, reusable/global sections, templates, custom
+  CSS per element, animations or forms (later milestones). Widgets and shortcodes are first-party only until
+  plugins (M6).
+- **Shortcodes** follow WordPress syntax for self-closing tags only (`[name …]` or `[name … /]`); enclosing pairs such
+  as `[x]…[/x]` are not supported, and `[gallery]` takes media ids typed by hand (no picker in the shortcode field;
+  the image widget has one).
+- **HTML embeds have a fixed height** (set in the widget) because the sandboxed document cannot resize its frame.
+- **Keyboard drag and drop** comes from `@dnd-kit`'s keyboard sensor and is not covered by an automated test; the
+  move up/down buttons and the navigator are the tested keyboard path.
+- **The builder is designed for screens ≥ 1024 px**; it works on tablets and phones (tested at 768 and 375 px) but
+  the canvas area is small there.
+- **Switching back to rich text** keeps the builder document but shows the old rich-text body; builder content is not
+  converted back.
+- Some OpenAPI component names are generic (`Schema2`, …) where no title is registered.
+
+### Security considerations for M5
+New controls (closed document schema with typed styles, CSS compiled from re-checked values and allowed by hash,
+shortcode registry without evaluation, capability-gated HTML embeds in an opaque-origin sandbox) and residual risks
+R-23…R-25 are listed in [`docs/security/threat-model.md`](../security/threat-model.md).
+
+---
+
+## Next: Milestone 6 — Plugins
 
 Planned scope (to be confirmed at milestone start):
 
-1. Versioned page document schema (sections, containers, widgets, responsive overrides) validated in the browser and
-   the API, with migrations between schema versions.
-2. Widget registry and first-party widgets (heading, text, image, button, spacer, columns, …) with renderers used by
-   both the editor canvas and the site runtime.
-3. Editor: canvas with drag and drop, selection, properties panel, undo/redo, responsive preview (desktop, tablet,
-   mobile), keyboard accessibility; saving through the existing revisions and concurrency model.
-4. Pages can choose between the rich-text body and a builder document; previews and the public site render both.
-5. Sandboxed HTML embed (iframe without `allow-same-origin`).
+1. Plugin manifest and SDK (`packages/plugin-sdk`) with versioned contracts and a test harness.
+2. Lifecycle (install, activate, deactivate, update, uninstall) with migrations per plugin and an audit trail.
+3. Trust tiers: declarative extensions validated by core; sandboxed code in an isolated process with
+   capability-checked RPC; trusted in-process code only with explicit administrator approval.
+4. Extension points: widgets and shortcodes for the builder (the registries were designed for it), admin pages in
+   sandboxed iframes, hooks on content events, scheduled jobs.
+5. Example and default plugins.
 
-Risks to address early: document schema evolution, XSS through widget properties, editor performance with large
-documents, accessibility of drag and drop.
+Risks to address early: isolation guarantees and their honest presentation in the UI, capability design,
+dependency and update supply chain, performance of hooks on hot paths.

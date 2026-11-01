@@ -168,9 +168,12 @@ describe('OpenAPI documentation', () => {
         '/api/v1/system/status',
       ]),
     );
-    const readySchema =
+    // Shared schemas are hoisted into components and referenced.
+    const readyRef =
       response.body.paths['/api/v1/health/ready'].get.responses['200'].content['application/json']
         .schema;
+    expect(readyRef).toEqual({ $ref: '#/components/schemas/Readiness' });
+    const readySchema = response.body.components.schemas.Readiness;
     expect(readySchema.properties.status.enum).toEqual(['ok', 'degraded', 'error']);
 
     const ui = await request(testApp.server).get('/api/docs/').expect(200);

@@ -22,3 +22,5 @@ export * from './contracts/themes.js';
 export * from './contracts/menus.js';
 export * from './contracts/redirects.js';
 export * from './contracts/delivery.js';
+export * from './contracts/builder.js';
+export * from './contracts/shortcodes.js';

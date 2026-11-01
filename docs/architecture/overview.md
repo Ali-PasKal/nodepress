@@ -43,7 +43,7 @@
 | Process | Responsibility | Status |
 |---|---|---|
 | `apps/api` | Authenticated management API, public Delivery API, OpenAPI, migrations, `/uploads` file serving | **M1–M4** (identity M2; content, media, jobs M3; delivery, appearance, menus, redirects M4) |
-| `apps/admin` | Admin dashboard and (from M5) the visual editor, served as static assets under `/admin/` | **M1–M4** (content, media, terms, content types, jobs in M3; dashboard, appearance, menus, SEO, redirects in M4) |
+| `apps/admin` | Admin dashboard and the visual builder, served as static assets under `/admin/` | **M1–M5** (content, media, terms, content types, jobs in M3; dashboard, appearance, menus, SEO, redirects in M4; visual builder in M5) |
 | `apps/site-runtime` | Public site: server-side rendering (React) of published content with the active theme, using only the public Delivery API — no database access, no credentials, no client-side JavaScript | **M4** |
 | worker (`apps/api/dist/worker.js`) | Background jobs and recurring tasks from the PostgreSQL queue; embedded in the API by default (`JOBS_WORKER`) | **M3** |
 
@@ -64,11 +64,8 @@ packages/
   shared/         Runtime-validated API contracts (Zod) shared by api and clients                    [M1]
   ui/             Design system (Tailwind v4 tokens + shadcn/ui-style components)                    [M1]
   cli/            `nexora` developer CLI                                                             [M1]
-  document/       Versioned page document schema, migrations, validators (browser + server)          [M5]
-  editor/         Editor state, drag-and-drop, widget controls (React)                               [M5]
-  widgets/        First-party widget definitions + renderers                                         [M5]
   plugin-sdk/     Plugin manifest schema, types, test harness                                        [M6]
-  theme-sdk/      Theme types, safe rich-text and responsive image components, helpers            [M4]
+  theme-sdk/      Theme types; safe rich-text, shortcode, builder and image components; builder CSS [M4–M5]
   theme-starter/  Starter theme: manifest (plain data, read by the API) + React templates + CSS    [M4]
 plugins/          First-party plugins (forms, analytics, backup, …)                                  [M6–M7]
 themes/           Further themes (business, editorial)                                               [M7]
@@ -81,8 +78,8 @@ Packages are only created when they contain working code; the bracketed mileston
 expected to appear. Dependency direction is strictly downward:
 
 ```
-apps/*  ──►  packages/{editor,widgets,document,plugin-sdk,theme-sdk,ui}  ──►  packages/shared
-plugins/*, themes/*  ──►  packages/{plugin-sdk,theme-sdk,document,shared}      (never into apps/*)
+apps/*  ──►  packages/{plugin-sdk,theme-sdk,ui}  ──►  packages/shared
+plugins/*, themes/*  ──►  packages/{plugin-sdk,theme-sdk,shared}      (never into apps/*)
 ```
 
 `packages/shared` must stay framework-free (Zod only) so it can be used by the API, the browser and SDKs.
@@ -125,7 +122,7 @@ Rules:
 | `appearance` | site settings (identity, language, home page, reading), SEO settings, theme registry and validated theme settings, menus and theme locations | **M4** |
 | `redirects` | manual redirects; automatic, flattened 301s when published URLs move | **M4** |
 | `delivery` | public read-only API consumed by site-runtime (pages, sitemap, feed, previews); one "publicly visible" predicate | **M4** |
-| `builder` | editor documents, global widgets, reusable sections | M5 |
+| `builder` | builder documents live on entries (`content` module validates them, `delivery` resolves shortcodes, posts widgets and embeds); global widgets and reusable sections are later work | **M5** |
 | `extensions` | plugin registry, lifecycle, capability grants, hook bus | M6 |
 | `forms` | form definitions, submissions, retention, export | M7 |
 | `import` | WXR parsing, previews, import jobs | M7 |
@@ -231,20 +228,41 @@ without any script source. Theme settings reach the page as CSS custom propertie
 carries the (re-validated) values, so pages contain no inline styles or scripts. Pages are rendered per request
 with ETags (`Cache-Control: max-age=0, must-revalidate`); an HTML cache is a later performance task.
 
-**M5 (planned):**
+**M5 (implemented).** Entries of content types with `hasBuilder` (pages by default) can be laid out in the visual
+builder instead of the rich-text editor (`entries.editor` = `builder`, document in `entries.builder`):
 
-- Pages built in the editor are stored as a **typed, versioned JSON document** (tree of sections, containers,
-  widgets with stable ids, responsive overrides). There is no stored HTML or JavaScript in the model.
-- The same Zod schema validates documents in the browser and on the server. Each document carries a
-  `schemaVersion`; pure migration functions upgrade old documents on read.
-- Widgets are registered definitions: `{ id, version, schema, defaults, controls, render }`. The public
-  renderer walks the tree and calls the registered renderer, which emits escaped output. Unknown widgets render
-  nothing in production and a visible notice in the editor.
-- Responsive values resolve desktop → tablet → mobile (each breakpoint inherits from the next larger one unless
-  overridden). Styles compile to scoped CSS classes using design-token CSS variables, not inline styles.
-- "HTML Embed" is sanitised with an allowlist and rendered inside a sandboxed `iframe` (`srcdoc`, no
-  `allow-same-origin`) so it cannot touch the site origin.
-- Dynamic data bindings reference a fixed set of named data sources and fields — no expression evaluation.
+- **Document.** A typed, versioned JSON tree with a fixed depth: sections (boxed or full width) → columns (width per
+  breakpoint, vertical alignment) → widgets (heading, text, image, button, spacer, divider, video, posts, shortcode,
+  HTML embed). Elements have stable 8-character ids. One Zod schema (`packages/shared/src/contracts/builder.ts`)
+  validates documents in the admin and the API, with size and count limits; each document carries a
+  `schemaVersion`, `upgradeBuilderDocument` migrates old versions, newer versions are refused. Widget types are a
+  closed discriminated union, so unknown widgets cannot be stored. No HTML or JavaScript is stored except the code
+  of HTML embed widgets.
+- **Styles.** Typed values only (hex colours, bounded integers, enums) per breakpoint; `compileBuilderCss` turns
+  them into rules scoped by `.nx-el-<id>` and re-checks every value. Tablet and mobile values are container queries
+  on the builder root (`@container nxb (max-width: 1024px | 640px)`), each breakpoint inheriting from the larger
+  one, so the editor's device preview (which resizes a container) and the site behave identically. The site sends
+  the compiled CSS as one inline `<style>` allowed by its SHA-256 in the page's CSP (`style-src 'self'
+  'sha256-…'`): no `unsafe-inline` and no per-request nonce, so pages stay deterministic for ETags.
+- **Rendering.** `@nexora/theme-sdk` renders documents with React (`BuilderContent`, `WidgetView`), with layout
+  CSS in `@nexora/theme-sdk/builder.css`. The admin canvas uses the same components and CSS (with placeholders for
+  videos, embeds and dynamic data, which the admin CSP does not allow to load), so the canvas matches the site.
+- **Shortcodes.** `[name attr="value"]` in rich text and builder text/shortcode widgets. A linear-time parser
+  (bounded input and count) produces tokens; a registry of typed definitions (`button`, `recent_posts`, `gallery`,
+  `video`, `site_name`, `year`) validates attributes. The Delivery API resolves dynamic ones (latest posts, gallery
+  media) from publicly visible content and sends them keyed by the shortcode text; the theme SDK renders every
+  shortcode as React elements. Unknown or invalid shortcodes stay literal text (as in WordPress); `[[x]]` escapes.
+  Nothing is evaluated: there are no callbacks, expressions or templates.
+- **HTML embeds.** The page payload never contains embed code. The site renders an `<iframe sandbox>` pointing at
+  `/_embed/{entryId}/{widgetId}` (or the preview equivalent), which the runtime serves with
+  `Content-Security-Policy: sandbox allow-scripts allow-popups allow-forms` — an opaque origin without access to
+  the site's cookies, storage or DOM, even when opened directly. (A `srcdoc` iframe would inherit the page's
+  script-free CSP and could not run the snippets embeds are for.) Saving embeds requires `content.embed_html`.
+- **Editor.** `apps/admin/src/features/builder`: a full-screen route with a widget library, canvas, navigator and
+  properties panel; drag and drop via `@dnd-kit` (pointer, touch and keyboard sensors, plus move up/down buttons);
+  an undo/redo history of whole documents in a zustand store (quick edits of one field merge into one step); pure
+  immutable document operations (`document-ops.ts`); saving through the existing optimistic concurrency,
+  revisions, publishing and preview links.
 
 ## 8. Themes and plugins (M4, M6)
 
@@ -252,8 +270,8 @@ with ETags (`Cache-Control: max-age=0, must-revalidate`); an HTML cache is a lat
 types and defaults, menu locations) and React templates rendered by the site runtime. The API imports only the
 manifest, to validate settings (`buildThemeSettingsSchema`) and to resolve stored values leniently
 (`resolveThemeSettings`: stale values fall back to defaults). Because themes are code, installing third-party
-themes is part of the extension trust model (M6) and not offered in M4; when the M5 document model exists,
-templates can become declarative data so that untrusted themes need no code at all.
+themes is part of the extension trust model (M6) and not offered in M4. The M5 builder document model makes it
+possible for templates to become declarative data later, so that untrusted themes need no code at all.
 
 **Plugins** — the manifest is metadata, not a security boundary. Three trust tiers:
 

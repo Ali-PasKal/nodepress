@@ -47,6 +47,10 @@ export const CORE_CAPABILITIES = {
     description: 'Edit and delete media uploaded by other users',
   },
   'jobs.manage': { category: 'system', description: 'View and retry background jobs' },
+  'content.embed_html': {
+    category: 'content',
+    description: 'Add HTML embed widgets (third-party code, shown sandboxed)',
+  },
   'appearance.manage': {
     category: 'appearance',
     description: 'Choose and configure the theme, site identity, reading settings and menus',
@@ -88,6 +92,7 @@ export const SYSTEM_ROLE_DEFAULTS: Readonly<
     'media.upload',
     'media.manage',
     'seo.manage',
+    'content.embed_html',
   ],
   author: [
     'dashboard.access',

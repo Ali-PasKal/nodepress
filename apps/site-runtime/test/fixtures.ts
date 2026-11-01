@@ -128,6 +128,11 @@ export function entry(overrides: Partial<DeliveryEntry> = {}): DeliveryEntry {
     fields: [{ key: 'price', label: 'Price', type: 'number', value: 12, display: '12' }],
     media: {},
     seo: { title: '', description: '', noindex: false },
+    editor: 'rich_text',
+    builder: null,
+    builderCss: '',
+    shortcodes: {},
+    posts: {},
     ...overrides,
   };
 }
@@ -144,6 +149,7 @@ export interface FakeApi {
   feed: DeliveryFeed;
   down: boolean;
   notInstalled: boolean;
+  embeds: Map<string, { html: string; title: string }>;
   calls: string[];
 }
 
@@ -159,6 +165,7 @@ export function fakeApi(): FakeApi {
     },
     down: false,
     notInstalled: false,
+    embeds: new Map(),
     calls: [],
   };
 }
@@ -194,6 +201,14 @@ export function fakeClient(api: FakeApi): DeliveryClient {
     feed() {
       guard('feed');
       return Promise.resolve(api.feed);
+    },
+    embed(entryId, widgetId) {
+      guard(`embed ${entryId} ${widgetId}`);
+      return Promise.resolve(api.embeds.get(`${entryId}/${widgetId}`) ?? null);
+    },
+    previewEmbed(token, widgetId) {
+      guard(`preview-embed ${token} ${widgetId}`);
+      return Promise.resolve(api.embeds.get(`${token}/${widgetId}`) ?? null);
     },
   };
 }

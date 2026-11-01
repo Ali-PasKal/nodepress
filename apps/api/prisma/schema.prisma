@@ -302,6 +302,8 @@ model ContentType {
   hasBody          Boolean  @default(true) @map("has_body")
   hasExcerpt       Boolean  @default(true) @map("has_excerpt")
   hasFeaturedImage Boolean  @default(true) @map("has_featured_image")
+  /// Entries can be laid out with the visual builder (M5).
+  hasBuilder       Boolean  @default(false) @map("has_builder")
   isSystem         Boolean  @default(false) @map("is_system")
   /// First URL segment of entries of this type ("blog" → /blog/<path>); empty only for the built-in Page type.
   routePrefix      String   @unique @map("route_prefix") @db.VarChar(64)
@@ -403,6 +405,10 @@ model Entry {
   fields          Json        @default("{}")
   /// Per-entry SEO overrides: { title, description, noindex }.
   seo             Json        @default("{}")
+  /// "rich_text" or "builder" (M5).
+  editor          String      @default("rich_text") @db.VarChar(16)
+  /// Visual builder document (validated against the shared builder schema); kept when switching back.
+  builder         Json?
   /// Lower-cased title, excerpt and body text for admin search.
   searchText      String      @default("") @map("search_text")
   featuredMediaId String?     @map("featured_media_id") @db.Uuid

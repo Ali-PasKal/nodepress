@@ -188,3 +188,73 @@ describe('helpers', () => {
     expect(isCurrentLink('https://example.org/blog', '/blog')).toBe(false);
   });
 });
+
+describe('shortcodes in rich text', () => {
+  const context = {
+    resolved: {
+      'recent_posts?count=2': {
+        name: 'recent_posts' as const,
+        items: [
+          {
+            id: '0193e0a4-6a5b-7c2d-8e9f-0000000000aa',
+            type: 'post',
+            title: '<b>Post</b>',
+            url: '/blog/post',
+            summary: '',
+            publishedAt: '2026-10-01T10:00:00.000Z',
+            updatedAt: '2026-10-01T10:00:00.000Z',
+            author: { displayName: 'A' },
+            featuredMedia: null,
+            terms: [],
+          },
+        ],
+      },
+    },
+    siteName: 'My <Site>',
+    language: 'en',
+    now: new Date('2031-05-01T00:00:00Z'),
+  };
+  const doc = (text: string): RichTextDocument => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+  });
+
+  it('renders registered shortcodes, escapes data and keeps unknown ones literal', () => {
+    const html = renderToStaticMarkup(
+      <RichText
+        document={doc(
+          '© [year] [site_name] — [button text="Go <now>" url="/go" style=outline] [missing] [[year]]',
+        )}
+        shortcodes={context}
+      />,
+    );
+    expect(html).toBe(
+      '<div><p>© 2031 My &lt;Site&gt; — <a href="/go" class="nx-btn nx-btn-outline">Go &lt;now&gt;</a> [missing] [year]</p></div>',
+    );
+  });
+
+  it('turns paragraphs with block shortcodes into divs and refuses unsafe attributes', () => {
+    const html = renderToStaticMarkup(
+      <RichText
+        document={doc('Latest: [recent_posts count=2] [button text=x url="javascript:alert(1)"]')}
+        shortcodes={context}
+      />,
+    );
+    expect(html).toContain(
+      '<div class="nx-p">Latest: <ul class="nx-sc-posts"><li><a href="/blog/post">&lt;b&gt;Post&lt;/b&gt;</a>',
+    );
+    expect(html).toContain('[button text=x url=&quot;javascript:alert(1)&quot;]');
+    expect(html).not.toContain('href="javascript');
+    const video = renderToStaticMarkup(
+      <RichText document={doc('[video youtube=dQw4w9WgXcQ]')} shortcodes={context} />,
+    );
+    expect(video).toContain('src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"');
+    expect(video).toContain(
+      'sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"',
+    );
+    // Without a context, text stays literal (e.g. the admin's read-only views).
+    expect(renderToStaticMarkup(<RichText document={doc('[year]')} />)).toBe(
+      '<div><p>[year]</p></div>',
+    );
+  });
+});
