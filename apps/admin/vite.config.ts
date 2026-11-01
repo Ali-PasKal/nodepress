@@ -13,14 +13,14 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    proxy: { '/api': { target: apiTarget } },
+    proxy: { '/api': { target: apiTarget }, '/uploads': { target: apiTarget } },
   },
   preview: {
     port: 4173,
     strictPort: true,
     // Production security headers (the dev server omits them: React Fast Refresh needs inline scripts).
     headers: { ...ADMIN_SECURITY_HEADERS },
-    proxy: { '/api': { target: apiTarget } },
+    proxy: { '/api': { target: apiTarget }, '/uploads': { target: apiTarget } },
   },
   build: {
     target: 'es2022',

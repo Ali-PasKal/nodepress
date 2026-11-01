@@ -11,7 +11,9 @@ async function main(): Promise<void> {
 
   const server: Server = app.getHttpServer();
   // Transport-level limits complement the per-handler TimeoutInterceptor.
-  server.requestTimeout = config.http.requestTimeoutMs + 5_000;
+  // Uploads may legitimately take longer than other requests (their own route timeout applies).
+  server.requestTimeout =
+    Math.max(config.http.requestTimeoutMs, config.media.uploadTimeoutMs) + 5_000;
   server.headersTimeout = 20_000;
   server.keepAliveTimeout = 5_000;
 

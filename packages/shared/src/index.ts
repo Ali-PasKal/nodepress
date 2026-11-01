@@ -16,3 +16,4 @@ export * from './contracts/jobs.js';
 export * from './contracts/content.js';
 export * from './contracts/fields.js';
 export * from './contracts/rich-text.js';
+export * from './contracts/media.js';

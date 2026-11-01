@@ -56,9 +56,16 @@ jobs:
         options: >-
           --health-cmd "valkey-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 12
+      # S3-compatible server for the S3 media storage driver tests.
+      s3:
+        image: adobe/s3mock:4.6.0
+        env:
+          COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: nexora-test
+        ports: ['9090:9090']
     env:
       TEST_DATABASE_URL: postgresql://nexora:nexora_ci_password@localhost:5432/nexora_test
       TEST_REDIS_URL: redis://localhost:6379
+      TEST_S3_ENDPOINT: http://localhost:9090
       E2E_DATABASE_URL: postgresql://nexora:nexora_ci_password@localhost:5432/nexora_e2e
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,6 +77,9 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+
+      - name: Wait for the S3-compatible test server
+        run: for i in $(seq 1 60); do curl -sf http://localhost:9090/ > /dev/null && exit 0; sleep 1; done; exit 1
 
       # Applies every migration to an empty database (Vitest global setup), then runs all suites.
       - name: Unit and integration tests

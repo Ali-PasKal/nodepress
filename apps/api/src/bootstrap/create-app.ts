@@ -6,6 +6,7 @@ import type { DestinationStream } from 'pino';
 import { AppModule } from '../app.module.js';
 import { createRequestIdMiddleware } from '../common/http/request-id.middleware.js';
 import type { AppConfig } from '../config/app-config.js';
+import { UploadsHandler } from '../modules/media/uploads.handler.js';
 import { applyHttpSecurity } from './http-security.js';
 import { setupOpenApi } from './openapi.js';
 
@@ -45,6 +46,8 @@ export async function createApp(
   applyHttpSecurity(app, config);
   // JSON is the only accepted request body format; anything larger than the limit is rejected with 413.
   app.useBodyParser('json', { limit: config.http.bodyLimit, strict: true });
+  // Public media files (outside the versioned API; served from any storage driver).
+  app.use('/uploads', app.get(UploadsHandler).middleware());
 
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });

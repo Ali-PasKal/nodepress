@@ -22,3 +22,11 @@ export function assertDisposableTestDatabase(url: string): void {
     );
   }
 }
+
+/**
+ * Optional: an S3-compatible endpoint with an existing bucket TEST_S3_BUCKET (default "nexora-test"),
+ * to run the S3 storage driver tests, e.g. `docker run -p 9090:9090
+ * -e COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=nexora-test adobe/s3mock:4.6.0`.
+ */
+export const TEST_S3_ENDPOINT = process.env.TEST_S3_ENDPOINT;
+export const TEST_S3_BUCKET = process.env.TEST_S3_BUCKET ?? 'nexora-test';

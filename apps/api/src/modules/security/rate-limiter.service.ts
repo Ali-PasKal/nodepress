@@ -22,6 +22,7 @@ export const RATE_LIMITS = {
   passwordResetPerAccount: { limit: 3, windowMs: 60 * 60_000 },
   passwordResetConfirmPerIp: { limit: 10, windowMs: 15 * 60_000 },
   setupPerIp: { limit: 10, windowMs: 15 * 60_000 },
+  mediaUploadPerUser: { limit: 60, windowMs: 10 * 60_000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 /**

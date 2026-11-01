@@ -70,6 +70,8 @@ export interface AppConfig {
     readonly storage: 'local' | 's3';
     readonly localDir: string;
     readonly maxUploadBytes: number;
+    /** Upload requests may take this long (large files on slow connections). */
+    readonly uploadTimeoutMs: number;
     /** Public URL prefix for stored files (e.g. a CDN or public bucket); null = served by the API at /uploads. */
     readonly publicBaseUrl: string | null;
     readonly s3: S3Config | null;

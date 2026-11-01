@@ -203,6 +203,7 @@ export const envSchema = z
     MEDIA_STORAGE: z.enum(['local', 's3']).default('local'),
     MEDIA_LOCAL_DIR: z.string().min(1).default(DEFAULT_MEDIA_DIR),
     MEDIA_MAX_UPLOAD_MB: integer(1, 512).default(25),
+    MEDIA_UPLOAD_TIMEOUT_MS: integer(10_000, 3_600_000).default(300_000),
     MEDIA_PUBLIC_BASE_URL: urlPrefix.optional(),
     S3_BUCKET: z.string().min(3).max(63).optional(),
     S3_REGION: z.string().min(1).max(64).default('us-east-1'),
@@ -405,6 +406,7 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
       storage: parsed.MEDIA_STORAGE,
       localDir: parsed.MEDIA_LOCAL_DIR,
       maxUploadBytes: parsed.MEDIA_MAX_UPLOAD_MB * 1024 * 1024,
+      uploadTimeoutMs: parsed.MEDIA_UPLOAD_TIMEOUT_MS,
       publicBaseUrl: parsed.MEDIA_PUBLIC_BASE_URL ?? null,
       s3:
         parsed.S3_BUCKET === undefined
