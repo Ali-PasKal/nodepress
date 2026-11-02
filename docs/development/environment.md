@@ -59,6 +59,9 @@ offending variable names — never their values — if anything is invalid. Empt
 | `S3_FORCE_PATH_STYLE` | `false` | Path-style bucket addressing (most self-hosted S3-compatible servers need `true`) |
 | `CONTENT_TRASH_RETENTION_DAYS` | `30` | Trashed entries are deleted permanently after this many days |
 | `CONTENT_REVISIONS_LIMIT` | `50` | Revisions kept per entry (oldest are pruned) |
+| `PLUGINS_ENABLED` | `true` | Emergency switch: `false` stops all plugin code (no sandboxes start, plugin shortcodes stay literal, plugin events are skipped, activation is refused) |
+| `PLUGINS_BUNDLED_DIR` | `<repo>/plugins` | Folder of first-party plugins offered for installation (`/app/plugins` in the API image) |
+| `PLUGINS_MEMORY_MB` | `64` | Hard cap of each plugin sandbox's WebAssembly memory (16–512) |
 
 ### Production safety rules (`NODE_ENV=production`)
 

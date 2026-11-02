@@ -20,6 +20,11 @@ COPY packages/ui/package.json packages/ui/
 COPY packages/theme-sdk/package.json packages/theme-sdk/
 COPY packages/theme-starter/package.json packages/theme-starter/
 COPY packages/cli/package.json packages/cli/
+COPY packages/plugin-runtime/package.json packages/plugin-runtime/
+COPY packages/plugin-sdk/package.json packages/plugin-sdk/
+COPY plugins/reading-time/package.json plugins/reading-time/
+COPY plugins/related-posts/package.json plugins/related-posts/
+COPY plugins/publish-notifications/package.json plugins/publish-notifications/
 COPY packages/cli/bin packages/cli/bin
 # Optional extra CA for builds behind a TLS-intercepting proxy. Passed as a BuildKit secret so it is
 # never written to an image layer:  docker build --secret id=extra_ca,src=/path/to/ca.pem ...

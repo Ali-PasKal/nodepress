@@ -470,7 +470,7 @@ function Detail({ plugin }: { plugin: PluginDetail }) {
             <CardTitle className="text-base">Settings</CardTitle>
           </CardHeader>
           <CardContent>
-            <SettingsForm key={plugin.updatedAt} plugin={plugin} />
+            <SettingsForm key={plugin.id} plugin={plugin} />
           </CardContent>
         </Card>
       ) : null}

@@ -42,10 +42,11 @@
 
 | Process | Responsibility | Status |
 |---|---|---|
-| `apps/api` | Authenticated management API, public Delivery API, OpenAPI, migrations, `/uploads` file serving | **M1–M4** (identity M2; content, media, jobs M3; delivery, appearance, menus, redirects M4) |
+| `apps/api` | Authenticated management API, public Delivery API, OpenAPI, migrations, `/uploads` file serving | **M1–M6** (identity M2; content, media, jobs M3; delivery, appearance, menus, redirects M4; builder M5; plugins M6) |
 | `apps/admin` | Admin dashboard and the visual builder, served as static assets under `/admin/` | **M1–M5** (content, media, terms, content types, jobs in M3; dashboard, appearance, menus, SEO, redirects in M4; visual builder in M5) |
 | `apps/site-runtime` | Public site: server-side rendering (React) of published content with the active theme, using only the public Delivery API — no database access, no credentials, no client-side JavaScript | **M4** |
 | worker (`apps/api/dist/worker.js`) | Background jobs and recurring tasks from the PostgreSQL queue; embedded in the API by default (`JOBS_WORKER`) | **M3** |
+| plugin sandboxes (`packages/plugin-runtime/dist/host.js`) | One child process per active plugin, started by the API or worker process on demand: runs the plugin in QuickJS (WebAssembly) with an empty environment and Node's permission model; no database, filesystem or secrets | **M6** |
 
 **Single origin by default.** Admin (`/admin/`), API (`/api/`) and the public site (`/`) share one origin in the
 default topology so session cookies can be `SameSite=Strict` and CORS is not needed. A **hardened topology**
@@ -64,10 +65,11 @@ packages/
   shared/         Runtime-validated API contracts (Zod) shared by api and clients                    [M1]
   ui/             Design system (Tailwind v4 tokens + shadcn/ui-style components)                    [M1]
   cli/            `nexora` developer CLI                                                             [M1]
-  plugin-sdk/     Plugin manifest schema, types, test harness                                        [M6]
   theme-sdk/      Theme types; safe rich-text, shortcode, builder and image components; builder CSS [M4–M5]
+  plugin-runtime/ Plugin packages (strict ZIP reader) and the sandbox: QuickJS engine, host, client [M6]
+  plugin-sdk/     Plugin types, test harness, packaging (nexora-plugin check|pack)                   [M6]
   theme-starter/  Starter theme: manifest (plain data, read by the API) + React templates + CSS    [M4]
-plugins/          First-party plugins (forms, analytics, backup, …)                                  [M6–M7]
+plugins/          First-party plugins (reading time, related posts, publish notifications), sandboxed [M6]
 themes/           Further themes (business, editorial)                                               [M7]
 infrastructure/
   docker/         Dockerfiles and runtime configs                                                    [M1]
@@ -78,8 +80,8 @@ Packages are only created when they contain working code; the bracketed mileston
 expected to appear. Dependency direction is strictly downward:
 
 ```
-apps/*  ──►  packages/{plugin-sdk,theme-sdk,ui}  ──►  packages/shared
-plugins/*, themes/*  ──►  packages/{plugin-sdk,theme-sdk,shared}      (never into apps/*)
+apps/*  ──►  packages/{plugin-runtime,plugin-sdk,theme-sdk,ui}  ──►  packages/shared
+plugins/*, themes/*  ──►  packages/{plugin-sdk,theme-sdk,shared}      (never into apps/*; plugins only in tests)
 ```
 
 `packages/shared` must stay framework-free (Zod only) so it can be used by the API, the browser and SDKs.
@@ -123,7 +125,7 @@ Rules:
 | `redirects` | manual redirects; automatic, flattened 301s when published URLs move | **M4** |
 | `delivery` | public read-only API consumed by site-runtime (pages, sitemap, feed, previews); one "publicly visible" predicate | **M4** |
 | `builder` | builder documents live on entries (`content` module validates them, `delivery` resolves shortcodes, posts widgets and embeds); global widgets and reusable sections are later work | **M5** |
-| `extensions` | plugin registry, lifecycle, capability grants, hook bus | M6 |
+| `extensions` | plugin lifecycle, sandbox runtime, capability RPC with grants and quotas, SSRF-guarded fetch, plugin shortcodes for delivery, entry events via the job queue | **M6** |
 | `forms` | form definitions, submissions, retention, export | M7 |
 | `import` | WXR parsing, previews, import jobs | M7 |
 
@@ -273,18 +275,39 @@ manifest, to validate settings (`buildThemeSettingsSchema`) and to resolve store
 themes is part of the extension trust model (M6) and not offered in M4. The M5 builder document model makes it
 possible for templates to become declarative data later, so that untrusted themes need no code at all.
 
-**Plugins** — the manifest is metadata, not a security boundary. Three trust tiers:
+**Plugins (M6).** A plugin is a package (`nexora-plugin.json` + one ES module, optionally a README) stored in
+the database. The manifest is data the core validates (identity, plugin API version, permissions and hosts,
+typed settings, shortcodes with typed attributes, hooks); it is not a security boundary — the sandbox and the
+core's checks are. Developer guide: [`docs/plugins/README.md`](../plugins/README.md).
 
-| Tier | What it can do | How it runs |
-|---|---|---|
-| Declarative | Widgets composed of existing primitives, settings pages, content types, templates | Data only, validated by core |
-| Sandboxed (third-party) | Hooks, routes, jobs via a capability-scoped RPC API | Separate isolated process with resource limits and no direct DB/FS/network; every call checked against granted capabilities |
-| Trusted (first-party / explicitly approved) | Anything the core can do | In-process NestJS module; requires an administrator to approve it as trusted code with a clear warning |
+```
+API process (apps/api, modules/extensions)                 one child process per active plugin
+┌──────────────────────────────────────────┐   IPC (JSON,  ┌───────────────────────────────────────┐
+│ PluginRuntimeService ── PluginProcess ───┼── validated) ─┤ host.js  (empty env, --permission:    │
+│   watchdog, restarts, crash limit        │               │   reads only engine packages)         │
+│ PluginCapabilities (grants, quotas):     │◄── host calls ┤   QuickJS (WebAssembly, memory cap)   │
+│   storage · content:read · http:fetch ───┼─► SafeFetch   │   fresh runtime per call, deadline    │
+│ PluginShortcodesService (Delivery API)   │               │   plugin code + trusted bootstrap     │
+│ PluginEventsService (job queue)          │               └───────────────────────────────────────┘
+└──────────────────────────────────────────┘
+```
 
-Plugin admin UIs run in sandboxed iframes on a separate origin and talk to the admin over a typed
-`postMessage` bridge; plugin scripts are never injected into the admin origin. Activation runs the plugin's
-migrations and registration inside a transaction and records a lifecycle state machine
-(`installed → validated → active ⇄ inactive → uninstalled`, plus `failed`) so a failed activation rolls back.
+- **Runtime** (`packages/plugin-runtime`): the engine (`engine.ts`) runs one handler per call in a fresh QuickJS
+  runtime and context with a deadline, a stack limit and a hard WebAssembly memory cap; only a small trusted
+  bootstrap builds the plugin's `ctx`, whose methods become host calls. The child (`host.ts`) is started by
+  `PluginProcess` (`process.ts`) with an empty environment and Node's permission model; the parent validates every
+  message, kills a child that overruns a call, and restarts it on demand.
+- **Lifecycle** (`PluginsService`): install (upload or the bundled `plugins/` folder) → activate (the
+  administrator grants exactly the manifest's permissions and hosts; the code is loaded in a throwaway sandbox and
+  must export every declared handler; shortcode names must not collide) ⇄ deactivate → uninstall. Updates stay
+  active only if they ask for nothing new; three crashes in ten minutes mark a plugin as failed. All audited.
+- **Extension points:** shortcodes resolved by the Delivery API (attributes validated against the manifest;
+  output must be text or allowlisted rich text; deadline, per-page limit and short cache; themes render it without
+  expanding shortcodes inside), and `entry.published` / `entry.unpublished` events enqueued in the transaction of
+  the change and delivered by the job worker.
+- **Trust tiers (ADR 0005):** sandboxed code is the only kind that runs; manifest settings and attribute types are
+  the declarative part; there is no trusted in-process tier (first-party plugins run sandboxed too). Plugin
+  admin UIs in sandboxed iframes, builder widgets, routes and write access to content are later work.
 
 ## 9. Operations
 

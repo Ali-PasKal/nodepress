@@ -3,6 +3,9 @@ import { TEST_DATABASE_URL } from './test/helpers/test-env.js';
 
 export default defineConfig({
   test: {
+    // One module cache per package: packages are tested in parallel, and a cache shared at the workspace
+    // root can be cleared by one Vitest process while another is using it.
+    fsModuleCachePath: new URL('./node_modules/.vitest-cache', import.meta.url).pathname,
     include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
     environment: 'node',
     globalSetup: ['test/global-setup.ts'],

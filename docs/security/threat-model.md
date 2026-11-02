@@ -75,9 +75,15 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
   - Residual: an administrator who approves a malicious *trusted* plugin can compromise the instance. This is inherent to running server-side extensions in-process and is documented to administrators.
 
 ### 3.4 Malicious plugins (M6)
-- **Goals:** read secrets or the database directly, make outbound requests, inject script into the admin, persist backdoors.
-- **Mitigations (planned):** trust tiers (declarative / sandboxed / trusted); sandboxed plugins run in a separate isolated process with no direct database, filesystem or network access, with resource limits and a capability-checked RPC API; plugin admin UIs run in sandboxed iframes on a separate origin and never inside the admin origin; transactional activation with rollback.
-- **Explicit non-claim:** a Node.js process, a manifest, or TypeScript types do **not** sandbox code. In-process "trusted" plugins have full privileges.
+- **Goals:** read secrets or the database directly, make outbound requests, inject script into the admin or the public site, persist backdoors, exhaust resources.
+- **Mitigations (implemented, M6):**
+  - Third-party code runs **only** in a sandbox: each active plugin has its own child process running QuickJS compiled to WebAssembly. Plugin code sees no Node.js APIs (no `require`, filesystem, network, processes, timers or host globals); a fresh engine runtime and context per call, so no state survives between calls or visitors.
+  - The child process starts with an **empty environment** (no database URL, secrets or proxy settings) and Node's permission model: reads only from its own package and the engine's packages, no writes, no child processes, workers, native addons or WASI, no code generation from strings. Verified by a probe test that runs with the same flags.
+  - **Resource limits** on three layers: engine deadline (interrupt handler) and stack limit; a hard cap on the engine's WebAssembly memory (measured: QuickJS's own memory accounting is unreliable in this build, the memory cap is not); and the parent, which kills a child that overruns its call deadline, validates every message, caps results (256 KB), host calls (50 per call), log lines, storage (16 KB per value, 1 MB per plugin) and outbound requests (60 per minute), and marks a plugin as failed after three crashes in ten minutes.
+  - **Capabilities are core-implemented RPC calls** checked against what an administrator granted at activation (exactly the manifest's permissions and hosts; an update asking for more deactivates the plugin until reviewed): `content:read` goes through the public visibility predicate; `http:fetch` goes through the SSRF guard (§4).
+  - **Output is data, not markup:** shortcode results must be plain text or rich text that passes the stored-content allowlist; themes render it with the safe renderer and never expand shortcodes inside it. Plugin code never reaches the admin origin (no plugin admin UIs in M6; the README is shown as plain text).
+  - **Packages** are parsed by a strict ZIP reader (central directory only; no encryption, ZIP64 or multi-disk; size and count limits checked before inflating; inflate capped at the declared size; CRC verified) and stored in the database — nothing is written to disk. Installation, activation, updates, settings changes and removal require `plugins.manage` (administrators) and are audited. `PLUGINS_ENABLED=false` stops all plugin code.
+- **Explicit non-claims:** the sandbox is not a guarantee against every engine or WebAssembly bug. If both the QuickJS engine and V8's WebAssembly sandbox were escaped, the code would run as the child process: without secrets or database credentials and without filesystem writes, but **able to open network connections** (Node's permission model in the supported versions does not restrict the network). There is no in-process "trusted" tier: uploaded code never runs in the API process.
 
 ### 3.5 Compromised dependencies (supply chain)
 - Implemented (M1): exact version pinning plus a committed lockfile; `pnpm install --frozen-lockfile` in CI and Docker builds; dependency lifecycle scripts blocked by default (pnpm 10), with an explicit allowlist (`onlyBuiltDependencies`: `@prisma/engines` only; Prisma's version-gate script is explicitly ignored) and install-time telemetry explicitly blocked; `pnpm audit --prod --audit-level=high` gates CI; GitHub Actions pinned to commit SHAs with read-only `contents` permission and `persist-credentials: false`.
@@ -137,7 +143,7 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 | Durable jobs; secrets never in job payloads (reset token created by the job) | Implemented (M3) | `jobs/*`, `password-reset.service.ts`; `jobs.test.ts`, `mail.test.ts` |
 | SMTP with TLS and certificate verification required in production | Implemented (M3) | `env.schema.ts`, `mailer.service.ts`; `env.schema.test.ts`, `mail.test.ts` |
 | Expiry-based purging of sessions, tokens, rate-limit buckets, jobs, trash | Implemented (M3) | `maintenance.service.ts`, `entries.service.ts`; `maintenance.test.ts`, `entries.test.ts` |
-| SSRF guard (outbound fetches) | Planned (with the first feature that fetches URLs: M6/M7) | — |
+| SSRF guard for plugin requests (approved exact hosts, HTTPS on 443, every DNS answer checked against private/reserved ranges, connection pinned to the checked address, no redirects, header/size/time/rate limits) | Implemented (M6) | `extensions/safe-fetch.ts`, `plugin-capabilities.ts`; `safe-fetch.test.ts`, API `plugins.test.ts` |
 | Delivery API draft isolation (one visibility predicate + ancestor check), public-field opt-in | Implemented (M4) | `delivery/public-content.ts`, `delivery.service.ts`; `delivery.test.ts` |
 | Hashed, expiring preview tokens; private preview responses | Implemented (M4) | `entries.service.ts` (`createPreview`), `delivery.service.ts`, site runtime `app.ts`; `delivery.test.ts`, `app.test.ts` |
 | Public pages: CSP without scripts or inline styles, escaped head/JSON-LD/XML, ETags, 503 on API outage | Implemented (M4) | `apps/site-runtime/src/{app,html,seo,xml,themes}.ts`; `app.test.ts`, E2E `public-site.spec.ts` |
@@ -147,7 +153,9 @@ planned or as a residual risk. Each control below is marked **Implemented (M1)**
 | Builder CSS compiled from re-checked typed values; inline style allowed only by SHA-256 in the CSP | Implemented (M5) | shared `compileBuilderCss`; runtime `app.ts`, `html.ts`; `builder.test.ts`, runtime `app.test.ts`, E2E `builder.spec.ts` (no CSP violations) |
 | Shortcodes: bounded linear parser, typed registry, server-side resolution from public content, literal fallback | Implemented (M5) | shared `shortcodes.ts`, `delivery.service.ts`, theme-sdk `shortcodes.tsx`; `builder.test.ts`, API `builder.test.ts`, `theme-sdk.test.tsx`, E2E |
 | HTML embeds: capability-gated, opaque-origin CSP sandbox, never in page payloads or the admin | Implemented (M5) | `entries.service.ts`, `delivery.service.ts`, runtime `app.ts`; API `builder.test.ts`, runtime `app.test.ts`, E2E `builder.spec.ts` (parent and cookie access blocked) |
-| Plugin isolation | Planned (M6) | — |
+| Plugin isolation: QuickJS-in-WebAssembly per call, one child process per plugin with an empty environment and Node's permission model, WebAssembly memory cap, engine deadline, parent watchdog, validated messages, crash limit | Implemented (M6) | `packages/plugin-runtime` (`engine.ts`, `host.ts`, `process.ts`); `engine.test.ts`, `process.test.ts` (confinement probe, watchdog), API `plugins.test.ts` |
+| Plugin capabilities checked against administrator grants; quotas; output allowlist; events through the job queue with public data | Implemented (M6) | `extensions/*`; API `plugins.test.ts`, shared `plugins.test.ts`, theme-sdk tests |
+| Strict plugin package reader (ZIP limits before inflating, capped inflate, CRC, no encryption/ZIP64; packages stored in the database) | Implemented (M6) | `plugin-runtime/zip.ts`, `package.ts`; `package.test.ts` (zip bomb, tampering, unsafe names) |
 
 ## 5. Design decisions with security impact
 
@@ -169,16 +177,18 @@ Accepting client-chosen request ids would let attackers forge log correlation. T
 `^[A-Za-z0-9._:-]{8,128}$`.
 
 ### 5.4 Plugins
-See §3.4. The architecture deliberately separates "declarative" extensions (data validated by core),
-"sandboxed" code (isolated process, capability-checked RPC) and "trusted" code (in-process, explicit
-administrator approval). The UI and documentation must never present trusted plugins as sandboxed.
+See §3.4. ADR 0005's tiers are realised as follows in M6: **sandboxed** code (QuickJS in WebAssembly in a separate,
+confined process, capability-checked RPC) is the only way third-party code runs; **declarative** parts of a plugin
+(settings, shortcode attribute types, permissions) are manifest data validated by the core; a **trusted**
+in-process tier is not offered — first-party functionality ships as core modules, and first-party plugins run
+sandboxed like any other. The UI and documentation describe exactly what a plugin can and cannot do.
 
 ## 6. Residual risks (accepted or open)
 
 | Id | Risk | Status |
 |---|---|---|
 | R-01 | Zero-day in a pinned dependency or the Node.js runtime | Accepted; mitigated by audit gating, minimal dependencies and prompt updates |
-| R-02 | Administrator approves a malicious trusted plugin | Accepted by design (M6); requires explicit approval and warning |
+| R-02 | ~~Administrator approves a malicious trusted plugin~~ | Not applicable since M6: there is no trusted in-process tier; all plugins run sandboxed (see R-26, R-27 for what remains) |
 | R-03 | Same-origin admin and public site (see §5.1) | Accepted for the default topology; separate origin supported |
 | R-04 | Admin CSP allows `style-src 'unsafe-inline'` (required by Radix scroll-lock style injection) | Accepted; CSS injection is far lower impact than script injection, and scripts stay `'self'`-only |
 | R-05 | The timeout interceptor stops waiting but cannot cancel in-flight work | Mitigated by DB `statement_timeout`; accepted |
@@ -202,6 +212,10 @@ administrator approval). The UI and documentation must never present trusted plu
 | R-23 | Users with `content.embed_html` can put arbitrary third-party code on public pages; inside its sandbox it can show popups, submit forms anywhere, load remote resources and track visitors (e.g. a fake sign-in form) | Accepted (needed for maps, booking and analytics snippets): capability limited to administrators and editors by default, opaque origin (no access to the site, the admin or cookies), popups stay sandboxed, embed URLs are `noindex` and sent without referrer |
 | R-24 | Builder styles let authors change the look of their own pages freely within typed values (e.g. hide elements, low-contrast colours) | Accepted; values cannot leave the element's scope or inject CSS, and editors review content through the existing publishing rights |
 | R-25 | Dynamic shortcodes and posts widgets add queries to a page view (up to 20 per entry, each bounded: 12 items per shortcode, 24 per posts widget, 24 gallery images) | Open with R-19 (page caching in M7); limits are enforced by the schema and the Delivery API |
+| R-26 | A sandbox escape through a bug in QuickJS **and** V8's WebAssembly implementation would run code as the plugin's child process, which can open network connections (Node's permission model does not restrict the network in the supported versions) | Accepted with mitigations: the process has no secrets, database credentials or writable filesystem, reads only the engine's packages, and is restarted on misbehaviour; operators can restrict egress at the network level and switch plugins off (`PLUGINS_ENABLED=false`) |
+| R-27 | Within its grants, a plugin decides what its shortcodes show (text, links) and what it sends to its approved hosts (public content, its own settings) — e.g. misleading links on pages that use its shortcode | Accepted (the administrator chooses which plugins to trust and which shortcodes to use); output is limited to allowlisted rich text, links are checked, hosts are approved explicitly |
+| R-28 | Plugin shortcodes add work to page views (up to 10 sandbox calls per entry, 2 s budget, results cached 30 s per API process) and each active plugin keeps a process (tens of MB) while in use | Open with R-19 (page caching in M7); idle sandboxes are stopped after 10 minutes |
+| R-29 | Plugin settings of type `secret` (e.g. webhook URLs) are stored in the database in plain text | Accepted for M6 (same as other site settings); never returned by the API, passed only to the plugin; encryption at rest is a later improvement |
 
 ## 7. Security checklist (per change)
 

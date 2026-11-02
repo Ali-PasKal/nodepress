@@ -13,7 +13,8 @@ When `OPENAPI_ENABLED` is on (the default outside production), the running API s
 
 - **Versioning:** URI-based, `/api/v1/...`. Breaking changes ship under a new version.
 - **Format:** JSON request and response bodies (`application/json`); bodies over `REQUEST_BODY_LIMIT` return 413. The
-  only exception is the media upload, which takes `multipart/form-data` (one `file` part, up to `MEDIA_MAX_UPLOAD_MB`).
+  exceptions are the media upload (`multipart/form-data`, one `file` part, up to `MEDIA_MAX_UPLOAD_MB`) and the plugin
+  package upload (`multipart/form-data`, one `file` part, a `.zip` of up to 2 MB).
 - **Concurrency:** entries carry a `version`. Updates must send the version they were based on; a stale version
   returns `409 CONFLICT` instead of overwriting someone else's changes.
 - **Rich text:** entry bodies are ProseMirror/TipTap JSON documents restricted to an allowlist (paragraphs, headings
@@ -116,6 +117,16 @@ When `OPENAPI_ENABLED` is on (the default outside production), the running API s
 | GET / PUT / DELETE | `/api/v1/menus/{id}` | `appearance.manage` | A menu with its items and their targets; replace name, location and the whole item tree; delete |
 | GET / POST | `/api/v1/redirects` | `seo.manage` | Redirects (`search`, `source`, paging); create a manual redirect |
 | PATCH / DELETE | `/api/v1/redirects/{id}` | `seo.manage` | Update (becomes manual); delete |
+| GET | `/api/v1/plugins` | `plugins.manage` | Installed plugins (status, requested and granted permissions, errors) and the first-party plugins that can be installed |
+| POST | `/api/v1/plugins` | `plugins.manage` | Install or update a plugin from a package (`multipart/form-data`, field `file`); installs inactive; 422 with manifest issues |
+| POST | `/api/v1/plugins/bundled/{id}` | `plugins.manage` | Install or update a first-party plugin shipped with NEXORA |
+| GET | `/api/v1/plugins/{id}` | `plugins.manage` | A plugin with README, setting definitions, current settings (secrets as `true`/`false`) and shortcodes |
+| POST | `/api/v1/plugins/{id}/activate` | `plugins.manage` | Activate, granting `{ permissions, hosts }` — must equal what the manifest asks for (409 otherwise); the code is loaded and checked in the sandbox first (422 when a declared handler is missing) |
+| POST | `/api/v1/plugins/{id}/deactivate` | `plugins.manage` | Deactivate (its code stops running) |
+| PUT | `/api/v1/plugins/{id}/settings` | `plugins.manage` | Change settings; omitted keys keep their value, `null` clears a secret |
+| GET | `/api/v1/plugins/{id}/logs` | `plugins.manage` | The 100 most recent log lines |
+| DELETE | `/api/v1/plugins/{id}` | `plugins.manage` | Uninstall an inactive plugin (code, settings, storage and logs) |
+| GET | `/api/v1/plugin-shortcodes` | `content.read`, `content.create` or `content.edit_others` | Shortcodes of active plugins, for editors |
 | GET | `/api/v1/delivery/site` | public | Site identity, SEO defaults, resolved theme settings and menus |
 | GET | `/api/v1/delivery/page?path=&page=` | public | Resolve a public path: `home`, `entry`, `archive`, `redirect` or `not_found` (always 200; the route says which) |
 | GET | `/api/v1/delivery/preview/{token}` | public + token | The entry a valid preview token names, in its latest saved state (`no-store`; 404 when invalid or expired) |
@@ -162,3 +173,10 @@ In entry responses of the Delivery API, builder entries carry `builder` (with `h
 are validated against each shortcode's schema. Unknown or invalid shortcodes are shown as literal text; `[[name]]`
 shows `[name]`. Dynamic shortcodes are resolved by the Delivery API from publicly visible content only (at most 20
 dynamic shortcodes and `posts` widgets per entry).
+
+**Plugins (M6).** Plugin code runs only in a sandbox process (see the [developer guide](../plugins/README.md)).
+Shortcodes of active plugins are resolved by the Delivery API like dynamic core shortcodes: in `shortcodes`, keyed
+by the shortcode text, as `{ name: "plugin", plugin: "<id>", content: <rich text> }` (an empty document when the
+plugin failed or returned nothing). Shortcodes of inactive plugins are not resolved and stay literal. An update
+that asks for more permissions than were granted deactivates the plugin until it is activated again.
+`PLUGINS_ENABLED=false` switches all plugin code off.

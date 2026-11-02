@@ -25,6 +25,11 @@ COPY packages/ui/package.json packages/ui/
 COPY packages/theme-sdk/package.json packages/theme-sdk/
 COPY packages/theme-starter/package.json packages/theme-starter/
 COPY packages/cli/package.json packages/cli/
+COPY packages/plugin-runtime/package.json packages/plugin-runtime/
+COPY packages/plugin-sdk/package.json packages/plugin-sdk/
+COPY plugins/reading-time/package.json plugins/reading-time/
+COPY plugins/related-posts/package.json plugins/related-posts/
+COPY plugins/publish-notifications/package.json plugins/publish-notifications/
 COPY packages/cli/bin packages/cli/bin
 # Optional extra CA for builds behind a TLS-intercepting proxy. Passed as a BuildKit secret so it is
 # never written to an image layer:  docker build --secret id=extra_ca,src=/path/to/ca.pem ...
@@ -37,6 +42,8 @@ COPY packages/shared packages/shared
 # The API validates theme settings against the installed themes' manifests (plain data, no rendering).
 COPY packages/theme-sdk packages/theme-sdk
 COPY packages/theme-starter packages/theme-starter
+# Plugin packages and the sandbox (QuickJS in WebAssembly) that runs them in child processes.
+COPY packages/plugin-runtime packages/plugin-runtime
 COPY apps/api apps/api
 RUN pnpm --filter "@nexora/api^..." run build \
  && pnpm --filter @nexora/api run build \
@@ -54,6 +61,9 @@ ENV NODE_ENV=production
 WORKDIR /app
 # Application files stay root-owned and read-only for the unprivileged runtime user.
 COPY --from=build /out ./
+# First-party plugins (installable from the admin; they run sandboxed like uploaded ones).
+COPY plugins /app/plugins
+ENV PLUGINS_BUNDLED_DIR=/app/plugins
 # Writable location for local media storage (MEDIA_LOCAL_DIR=/data/uploads); mount a volume here.
 RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node

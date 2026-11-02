@@ -3,11 +3,11 @@
 An extensible, self-hostable content management system and visual website builder, built with
 TypeScript, NestJS, PostgreSQL and React.
 
-> **Status: Milestone 5 of 8 (visual builder and shortcodes).** The foundation, identity and access control, the
-> content model, the media library, a durable job queue, the public website, and now a **visual page builder** are
-> in place: pages can be laid out with sections, columns and widgets (drag and drop, responsive styles, undo/redo),
-> and WordPress-style **shortcodes** work in any content. Plugins (M6) are **not implemented yet**. See
-> [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for exactly what works and what does not.
+> **Status: Milestone 6 of 8 (plugins).** The foundation, identity and access control, the content model, the media
+> library, a durable job queue, the public website, the visual page builder with shortcodes, and now **plugins** are
+> in place: plugins add shortcodes and react to publishing, and run in an isolated sandbox with only the permissions an
+> administrator grants. See [`docs/status/PROJECT_STATUS.md`](docs/status/PROJECT_STATUS.md) for exactly what works
+> and what does not.
 
 ## What exists today
 
@@ -43,6 +43,14 @@ TypeScript, NestJS, PostgreSQL and React.
   pages and builder widgets, with attributes validated per shortcode and dynamic data resolved on the server from
   published content only. Unknown or invalid shortcodes stay visible as text (as in WordPress) and are flagged in
   the editor; `[[name]]` writes a literal `[name]`. Nothing is executed.
+- **Plugins** (M6): install from a `.zip` or from NEXORA's own plugins, review the requested permissions,
+  configure them with a generated settings form, see their log, update and uninstall. A plugin offers shortcodes
+  (usable in posts, pages and the builder) and reacts to publishing. Plugin code runs only in a sandbox — QuickJS in
+  WebAssembly, one process per plugin, no environment, files or network of its own — with time and memory limits;
+  it can only use its settings, a private storage, published content (`content:read`) and HTTPS requests to approved
+  hosts through an SSRF guard (`http:fetch`). Shortcode output must pass the same allowlist as content. First-party
+  plugins: Reading time, Related posts, Publish notifications (Slack/Discord). A plugin SDK with a test harness and
+  `nexora plugin pack` are included ([developer guide](docs/plugins/README.md)).
 - **Admin** (`apps/admin`, React 19 + Vite 8 + Tailwind 4): dashboard, setup, sign-in, users, roles, audit log,
   profile, content lists and editor (with SEO panel, view and preview), media library, terms, content type builder,
   appearance (site identity, reading, theme settings), menus, SEO and redirects, background jobs, command palette
