@@ -118,14 +118,18 @@ export class PluginShortcodesService {
         ]);
       } else {
         value =
-          typeof output.data === 'string'
-            ? output.data === ''
-              ? EMPTY
-              : {
-                  type: 'doc',
-                  content: [{ type: 'paragraph', content: [{ type: 'text', text: output.data }] }],
-                }
-            : output.data;
+          output.data === null
+            ? EMPTY
+            : typeof output.data === 'string'
+              ? output.data === ''
+                ? EMPTY
+                : {
+                    type: 'doc',
+                    content: [
+                      { type: 'paragraph', content: [{ type: 'text', text: output.data }] },
+                    ],
+                  }
+              : output.data;
       }
     }
     if (this.cache.size >= CACHE_ENTRIES) this.cache.clear();

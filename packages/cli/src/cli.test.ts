@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parseCommandLine } from './args.ts';
@@ -211,5 +213,33 @@ describe('user reset-password', () => {
       const result = spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8' });
       assert.equal(result.status, 1, args.join(' '));
     }
+  });
+});
+
+describe('nexora plugin', () => {
+  const pluginDir = fileURLToPath(new URL('../../../plugins/reading-time', import.meta.url));
+
+  it('checks and packs a plugin folder into a zip', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'nexora-cli-plugin-'));
+    const out = join(outDir, 'reading-time.zip');
+    const check = spawnSync(process.execPath, [BIN, 'plugin', 'check', pluginDir], {
+      encoding: 'utf8',
+    });
+    assert.equal(check.status, 0, check.stderr);
+    assert.match(check.stdout, /Reading time 1\.0\.0 \(nexora\.reading-time\) is valid\./);
+    const pack = spawnSync(process.execPath, [BIN, 'plugin', 'pack', pluginDir, '--out', out], {
+      encoding: 'utf8',
+    });
+    assert.equal(pack.status, 0, pack.stderr);
+    assert.match(pack.stdout, /Packed nexora-plugin\.json, plugin\.js, README\.md/);
+    assert.equal(readFileSync(out).subarray(0, 2).toString('latin1'), 'PK');
+  });
+
+  it('explains invalid plugin folders', () => {
+    const result = spawnSync(process.execPath, [BIN, 'plugin', 'check', tmpdir()], {
+      encoding: 'utf8',
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /has no nexora-plugin\.json/);
   });
 });

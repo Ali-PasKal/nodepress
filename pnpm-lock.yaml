@@ -337,6 +337,10 @@ importers:
         version: 5.0.5(@types/node@22.20.5)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0))
 
   packages/cli:
+    dependencies:
+      '@nexora/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
     devDependencies:
       '@types/node':
         specifier: 22.20.5
@@ -359,6 +363,25 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.5
+        version: 22.20.5
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@types/node@22.20.5)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0))
+
+  packages/plugin-sdk:
+    dependencies:
+      '@nexora/plugin-runtime':
+        specifier: workspace:*
+        version: link:../plugin-runtime
+      '@nexora/shared':
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       '@types/node':
         specifier: 22.20.5
@@ -493,6 +516,24 @@ importers:
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@types/node@22.20.5)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0))
+
+  plugins/publish-notifications:
+    devDependencies:
+      '@nexora/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/reading-time:
+    devDependencies:
+      '@nexora/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/related-posts:
+    devDependencies:
+      '@nexora/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
 
 packages:
 

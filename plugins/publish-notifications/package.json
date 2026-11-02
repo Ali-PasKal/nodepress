@@ -1,0 +1,13 @@
+{
+  "name": "@nexora/plugin-publish-notifications",
+  "version": "1.0.0",
+  "private": true,
+  "description": "First-party NEXORA plugin (runs sandboxed like any other plugin)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@nexora/plugin-sdk": "workspace:*"
+  }
+}

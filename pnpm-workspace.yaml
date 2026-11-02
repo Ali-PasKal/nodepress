@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - plugins/*
 
 # pnpm 10 blocks dependency lifecycle scripts by default. Only packages that genuinely need an
 # install step are allowed; everything else stays blocked.

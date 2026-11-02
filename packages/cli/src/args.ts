@@ -9,6 +9,7 @@ export interface ParsedCommand {
     readonly force: boolean;
     readonly name?: string;
     readonly email?: string;
+    readonly out?: string;
     readonly help: boolean;
   };
 }
@@ -24,6 +25,7 @@ export function parseCommandLine(argv: readonly string[]): ParsedCommand {
       force: { type: 'boolean', default: false },
       name: { type: 'string' },
       email: { type: 'string' },
+      out: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
       version: { type: 'boolean', short: 'v', default: false },
     },
@@ -39,6 +41,7 @@ export function parseCommandLine(argv: readonly string[]): ParsedCommand {
       help: values.help,
       ...(values.name === undefined ? {} : { name: values.name }),
       ...(values.email === undefined ? {} : { email: values.email }),
+      ...(values.out === undefined ? {} : { out: values.out }),
     },
   };
 }

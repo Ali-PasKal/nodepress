@@ -3,6 +3,7 @@ import { parseCommandLine } from './args.ts';
 import { dev } from './commands/dev.ts';
 import { doctor } from './commands/doctor.ts';
 import { migrate } from './commands/migrate.ts';
+import { pluginCommand } from './commands/plugin.ts';
 import { userCommand } from './commands/user.ts';
 import { color, fail } from './output.ts';
 import { run, runSteps } from './process.ts';
@@ -28,6 +29,9 @@ ${color.bold('Commands')}
   user reset-password --email <email>
                           Account recovery: set a temporary password for a user
                           (signs them out everywhere; prints the password once)
+  plugin check <folder>   Validate a plugin folder (manifest, main file, limits)
+  plugin pack <folder> [--out <file.zip>]
+                          Build the package to upload under Plugins in the admin
   doctor                  Check Node, pnpm, Docker, .env, database and cache connectivity
   help                    Show this help
   version                 Print the CLI version
@@ -77,6 +81,8 @@ async function main(argv: readonly string[]): Promise<number> {
       });
     case 'user':
       return userCommand(positionals[0], flags.email);
+    case 'plugin':
+      return pluginCommand(positionals[0], positionals[1], flags.out);
     case 'doctor':
       return doctor();
     default:

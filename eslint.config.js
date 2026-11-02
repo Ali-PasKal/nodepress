@@ -115,6 +115,18 @@ export default defineConfig(
     languageOptions: { globals: globals.node },
   },
 
+  // Plugin code runs in the sandbox: no Node.js globals, console goes to the plugin log.
+  {
+    files: ['plugins/*/*.js'],
+    languageOptions: { globals: {}, sourceType: 'module' },
+    rules: { 'no-console': 'off' },
+  },
+  // Plugin tests and the SDK's command line run on Node and print to stdout.
+  {
+    files: ['plugins/*/test/**/*.mjs', 'packages/plugin-sdk/bin/*.js'],
+    rules: { 'no-console': 'off' },
+  },
+
   // Developer scripts print reports to stdout.
   {
     files: ['**/scripts/**/*.mjs'],

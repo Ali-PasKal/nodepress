@@ -58,22 +58,28 @@ export class PluginEventsService implements OnModuleInit {
     isPublic: boolean,
   ): Promise<void> {
     if (wasPublic === isPublic || !entry.type.isPublic || !this.runtime.enabled) return;
+    const hook = isPublic ? 'entry.published' : 'entry.unpublished';
+    const subscribers = await db.plugin.findMany({
+      where: { siteId: entry.siteId, status: 'active', hooks: { has: hook } },
+      select: { id: true },
+    });
+    if (subscribers.length === 0) return;
+    const site = await db.site.findUniqueOrThrow({
+      where: { id: entry.siteId },
+      select: { baseUrl: true },
+    });
     const event: PluginEntryEvent = {
-      event: isPublic ? 'entry.published' : 'entry.unpublished',
+      event: hook,
       entry: {
         id: entry.id,
         type: entry.type.key,
         title: entry.title,
-        url: publicEntryPath(entry.type.routePrefix, entry.path),
+        url: `${site.baseUrl.replace(/\/+$/, '')}${publicEntryPath(entry.type.routePrefix, entry.path)}`,
         excerpt: entry.excerpt.slice(0, 1_000),
         publishedAt: entry.publishedAt?.toISOString() ?? null,
       },
       occurredAt: new Date().toISOString(),
     };
-    const subscribers = await db.plugin.findMany({
-      where: { siteId: entry.siteId, status: 'active', hooks: { has: event.event } },
-      select: { id: true },
-    });
     for (const subscriber of subscribers) {
       await this.queue.enqueue(db, PluginEventJob, { pluginId: subscriber.id, event });
     }

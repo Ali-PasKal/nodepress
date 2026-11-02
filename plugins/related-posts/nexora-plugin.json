@@ -1,0 +1,23 @@
+{
+  "id": "nexora.related-posts",
+  "name": "Related posts",
+  "version": "1.0.0",
+  "description": "Lists published entries that share a category or tag with the current one: [related_posts].",
+  "author": "NEXORA",
+  "license": "MIT",
+  "apiVersion": 1,
+  "main": "plugin.js",
+  "permissions": ["content:read"],
+  "shortcodes": [
+    {
+      "name": "related_posts",
+      "label": "Related posts",
+      "description": "Published entries of the same type sharing a term with the current entry.",
+      "example": "[related_posts count=\"3\"]",
+      "attributes": {
+        "count": { "type": "number", "min": 1, "max": 10, "default": 3 },
+        "title": { "type": "string", "maxLength": 100, "default": "Related posts" }
+      }
+    }
+  ]
+}

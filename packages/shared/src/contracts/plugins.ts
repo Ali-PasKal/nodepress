@@ -89,12 +89,9 @@ export const PLUGIN_PERMISSION_INFO: Record<
 export const PLUGIN_HOOKS = ['entry.published', 'entry.unpublished'] as const;
 export type PluginHook = (typeof PLUGIN_HOOKS)[number];
 
-export const pluginHostSchema = z
-  .string()
-  .max(253)
-  .regex(HOSTNAME_PATTERN, {
-    message: 'Use a host name like hooks.example.com (no IP addresses).',
-  });
+export const pluginHostSchema = z.string().max(253).regex(HOSTNAME_PATTERN, {
+  message: 'Use a host name like hooks.example.com (no IP addresses).',
+});
 
 // ---------------------------------------------------------------------------------------------
 // Settings
@@ -477,6 +474,7 @@ export const pluginEntryEventSchema = z.object({
     id: z.string(),
     type: z.string(),
     title: z.string(),
+    /** Absolute public URL (built from the site's base URL). */
     url: z.string().nullable(),
     excerpt: z.string(),
     publishedAt: z.string().nullable(),
@@ -486,10 +484,11 @@ export const pluginEntryEventSchema = z.object({
 export type PluginEntryEvent = z.infer<typeof pluginEntryEventSchema>;
 
 /**
- * What a shortcode handler may return: plain text or a rich-text document. Rich text passes the same
- * allowlist as stored content (no HTML, safe URLs only).
+ * What a shortcode handler may return: nothing (`null`), plain text or a rich-text document. Rich text passes
+ * the same allowlist as stored content (no HTML, safe URLs only).
  */
 export const pluginShortcodeOutputSchema = z.union([
+  z.null(),
   z.string().max(10_000),
   richTextDocumentSchema,
 ]);

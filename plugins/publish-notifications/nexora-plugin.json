@@ -1,0 +1,40 @@
+{
+  "id": "nexora.publish-notifications",
+  "name": "Publish notifications",
+  "version": "1.0.0",
+  "description": "Posts a message to a Slack or Discord channel when an entry is published.",
+  "author": "NEXORA",
+  "license": "MIT",
+  "apiVersion": 1,
+  "main": "plugin.js",
+  "permissions": ["http:fetch"],
+  "hosts": ["hooks.slack.com", "discord.com"],
+  "settings": [
+    {
+      "key": "service",
+      "label": "Service",
+      "type": "select",
+      "options": [
+        { "value": "slack", "label": "Slack" },
+        { "value": "discord", "label": "Discord" }
+      ],
+      "default": "slack"
+    },
+    {
+      "key": "webhookUrl",
+      "label": "Webhook URL",
+      "description": "The incoming webhook address from Slack (https://hooks.slack.com/…) or Discord (https://discord.com/api/webhooks/…).",
+      "type": "secret",
+      "maxLength": 500
+    },
+    {
+      "key": "message",
+      "label": "Message",
+      "description": "{title} and {url} are replaced by the entry's title and address.",
+      "type": "text",
+      "maxLength": 500,
+      "default": "New on the site: {title} {url}"
+    }
+  ],
+  "hooks": ["entry.published"]
+}

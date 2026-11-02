@@ -289,7 +289,9 @@ describe('plugins', () => {
     expect(await storage('last')).toBeNull();
     const published = await patchEntry(owner, draft, { status: 'published' });
     await worker.drain();
-    expect(await storage('last')).toBe('entry.published:Quiet draft:/blog/quiet-draft');
+    expect(await storage('last')).toMatch(
+      /^entry\.published:Quiet draft:https?:\/\/[^/]+\/blog\/quiet-draft$/,
+    );
     await post(owner, `/api/v1/entries/${draft.id}/trash`, {}, 200);
     await worker.drain();
     expect(await storage('last')).toBe('entry.unpublished:Quiet draft');
@@ -426,6 +428,69 @@ describe('plugins', () => {
     const response = await owner.agent.get(`/api/v1/entries/${id}`).expect(200);
     return response.body as { id: string; version: number };
   }
+});
+
+describe('first-party plugins', () => {
+  let testApp: TestApp;
+  let owner: SignedIn;
+
+  beforeAll(async () => {
+    await resetIdentityData();
+    // The repository's plugins/ folder (the default PLUGINS_BUNDLED_DIR).
+    testApp = await createIdentityApp();
+    await install(testApp.server);
+    owner = await signIn(testApp.server, OWNER.email, OWNER.password);
+  });
+  afterAll(() => testApp.close());
+
+  it('installs and runs Reading time and Related posts from the bundled folder', async () => {
+    const list = pluginsResponseSchema.parse(
+      (await owner.agent.get('/api/v1/plugins').expect(200)).body,
+    );
+    expect(list.bundled.map((plugin) => plugin.id)).toEqual([
+      'nexora.publish-notifications',
+      'nexora.reading-time',
+      'nexora.related-posts',
+    ]);
+    const send = (path: string, body: object = {}) =>
+      owner.agent.post(path).set('X-CSRF-Token', owner.csrf).send(body).expect(201);
+    await send('/api/v1/plugins/bundled/nexora.reading-time');
+    await send('/api/v1/plugins/nexora.reading-time/activate', { permissions: [], hosts: [] });
+    await send('/api/v1/plugins/bundled/nexora.related-posts');
+    await send('/api/v1/plugins/nexora.related-posts/activate', {
+      permissions: ['content:read'],
+      hosts: [],
+    });
+    const model = await owner.agent.get('/api/v1/content-model').expect(200);
+    const category = (model.body as { taxonomies: { id: string; key: string }[] }).taxonomies.find(
+      (taxonomy) => taxonomy.key === 'category',
+    );
+    const term = await owner.agent
+      .post(`/api/v1/taxonomies/${category?.id ?? ''}/terms`)
+      .set('X-CSRF-Token', owner.csrf)
+      .send({ name: 'Guides' })
+      .expect(201);
+    const termIds = [(term.body as { id: string }).id];
+    await createEntry(owner, { title: 'Older guide', status: 'published', termIds });
+    const words = Array.from({ length: 460 }, (_, index) => `word${String(index)}`).join(' ');
+    const post = await createEntry(owner, {
+      title: 'Newest guide',
+      status: 'published',
+      termIds,
+      body: paragraphDoc(`[reading_time] ${words} [related_posts title="See also"]`),
+    });
+    const response = await request(testApp.server)
+      .get('/api/v1/delivery/page')
+      .query({ path: post.url ?? '' })
+      .expect(200);
+    const page = deliveryPageSchema.parse(response.body);
+    if (page.route.kind !== 'entry') throw new Error('expected an entry');
+    const shortcodes = JSON.stringify(page.route.entry.shortcodes);
+    expect(shortcodes).toContain('2 min read');
+    expect(shortcodes).toContain('See also');
+    expect(shortcodes).toContain('Older guide');
+    expect(shortcodes).not.toContain('Newest guide');
+  });
 });
 
 describe('plugins switched off', () => {

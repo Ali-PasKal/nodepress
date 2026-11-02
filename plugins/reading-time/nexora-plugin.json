@@ -1,0 +1,40 @@
+{
+  "id": "nexora.reading-time",
+  "name": "Reading time",
+  "version": "1.0.0",
+  "description": "Shows how long an entry takes to read, with the [reading_time] shortcode.",
+  "author": "NEXORA",
+  "license": "MIT",
+  "apiVersion": 1,
+  "main": "plugin.js",
+  "settings": [
+    {
+      "key": "wordsPerMinute",
+      "label": "Words per minute",
+      "description": "Average reading speed used for the estimate.",
+      "type": "number",
+      "min": 100,
+      "max": 1000,
+      "default": 230
+    },
+    {
+      "key": "label",
+      "label": "Text",
+      "description": "{minutes} is replaced by the number of minutes.",
+      "type": "text",
+      "maxLength": 100,
+      "default": "{minutes} min read"
+    }
+  ],
+  "shortcodes": [
+    {
+      "name": "reading_time",
+      "label": "Reading time",
+      "description": "Estimated reading time of the current entry.",
+      "example": "[reading_time]",
+      "attributes": {
+        "label": { "type": "string", "maxLength": 100 }
+      }
+    }
+  ]
+}
