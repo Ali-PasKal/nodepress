@@ -57,6 +57,7 @@ model Site {
   terms           Term[]
   entries         Entry[]
   media           Media[]
+  plugins         Plugin[]
 
   @@map("sites")
 }
@@ -90,6 +91,7 @@ model User {
   entryRevisions      EntryRevision[]
   uploadedMedia       Media[]
   previewTokens       PreviewToken[]
+  installedPlugins    Plugin[]
 
   @@index([status])
   @@map("users")
@@ -588,4 +590,72 @@ model PreviewToken {
 
   @@index([expiresAt])
   @@map("preview_tokens")
+}
+
+/// An installed plugin: its manifest, its code (run only in the sandbox process, never in the API) and what an
+/// administrator granted it. Packages are stored here, so nothing is written to disk and every API instance
+/// sees the same code.
+model Plugin {
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  siteId             String    @map("site_id") @db.Uuid
+  /// The manifest id ("acme.reading-time").
+  key                String    @db.VarChar(64)
+  name               String    @db.VarChar(80)
+  version            String    @db.VarChar(40)
+  /// The validated manifest (shared pluginManifestSchema).
+  manifest           Json
+  code               String
+  readme             String    @default("")
+  /// "upload" or "bundled" (a first-party package shipped with NEXORA).
+  source             String    @db.VarChar(16)
+  /// "inactive", "active" or "failed".
+  status             String    @default("inactive") @db.VarChar(16)
+  grantedPermissions String[]  @default([]) @map("granted_permissions") @db.VarChar(32)
+  grantedHosts       String[]  @default([]) @map("granted_hosts") @db.VarChar(253)
+  /// Hooks from the manifest, so events can find their subscribers with one query.
+  hooks              String[]  @default([]) @db.VarChar(32)
+  settings           Json      @default("{}")
+  error              String?   @db.VarChar(1000)
+  installedById      String?   @map("installed_by_id") @db.Uuid
+  installedAt        DateTime  @default(now()) @map("installed_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  activatedAt        DateTime? @map("activated_at") @db.Timestamptz(3)
+
+  site        Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  installedBy User?           @relation(fields: [installedById], references: [id], onDelete: SetNull)
+  storage     PluginStorage[]
+  logs        PluginLog[]
+
+  @@unique([siteId, key])
+  @@index([siteId, status])
+  @@map("plugins")
+}
+
+/// A plugin's private key–value storage (quota enforced by the API).
+model PluginStorage {
+  pluginId  String   @map("plugin_id") @db.Uuid
+  key       String   @db.VarChar(200)
+  value     Json
+  /// Size of the value as JSON, in bytes.
+  size      Int
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  plugin Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@id([pluginId, key])
+  @@map("plugin_storage")
+}
+
+/// Recent log lines written by a plugin (console.log in the sandbox) and by the core about it.
+model PluginLog {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  pluginId  String   @map("plugin_id") @db.Uuid
+  level     String   @db.VarChar(8)
+  message   String   @db.VarChar(1000)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  plugin Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@index([pluginId, createdAt])
+  @@map("plugin_logs")
 }

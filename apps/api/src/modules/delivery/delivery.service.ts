@@ -43,6 +43,7 @@ import { PrismaService } from '../../infrastructure/database/prisma.service.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import { MenusService } from '../appearance/menus.service.js';
 import { SiteSettingsService, type SiteState } from '../appearance/site-settings.service.js';
+import { PluginShortcodesService } from '../extensions/plugin-shortcodes.service.js';
 import { MediaUrls, type StoredVariant } from '../media/media-urls.js';
 import { sha256 } from '../security/crypto.js';
 import { filterVisibleAncestors, publicEntryWhere } from './public-content.js';
@@ -142,6 +143,11 @@ function plainTextOf(
   return body ? richTextToPlainText(body) : '';
 }
 
+function wordCount(text: string): number {
+  const flat = withoutShortcodes(text).trim();
+  return flat === '' ? 0 : flat.split(/\s+/).length;
+}
+
 function summarize(text: string, length = SUMMARY_LENGTH): string {
   const flat = withoutShortcodes(text).replace(/\s+/g, ' ').trim();
   if (flat.length <= length) return flat;
@@ -162,6 +168,7 @@ export class DeliveryService {
     private readonly settings: SiteSettingsService,
     private readonly menus: MenusService,
     private readonly mediaUrls: MediaUrls,
+    private readonly pluginShortcodes: PluginShortcodesService,
   ) {}
 
   async site(): Promise<DeliverySite> {
@@ -697,11 +704,24 @@ export class DeliveryService {
     const builder = builderOf(row);
     if (builder) mediaIds.push(...builderMediaIds(builder));
     const card = this.card(context, row);
-    const [media, shortcodes, posts] = await Promise.all([
+    const texts = shortcodeTexts(body, builder);
+    const [media, coreShortcodes, pluginShortcodes, posts] = await Promise.all([
       this.mediaMap(context.state.id, mediaIds),
-      this.resolveShortcodes(context, shortcodeTexts(body, builder)),
+      this.resolveShortcodes(context, texts),
+      this.pluginShortcodes.resolve(context.state.id, texts, {
+        id: row.id,
+        type: type.key,
+        title: row.title,
+        url: card.url,
+        wordCount: wordCount(plainTextOf(row, body)),
+        terms: row.terms.flatMap(({ term }) => {
+          const taxonomy = context.taxonomies.get(term.taxonomyId);
+          return taxonomy ? [{ taxonomy: taxonomy.key, slug: term.slug, name: term.name }] : [];
+        }),
+      }),
       this.resolvePostsWidgets(context, builder),
     ]);
+    const shortcodes = { ...pluginShortcodes, ...coreShortcodes };
     return {
       ...card,
       contentType: this.typeRef(type),

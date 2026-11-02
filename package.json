@@ -12,7 +12,7 @@
   },
   "scripts": {
     "nexora": "nexora",
-    "codegen": "pnpm --filter \"@nexora/theme-starter...\" run build && pnpm --filter @nexora/api run db:generate",
+    "codegen": "pnpm --filter \"@nexora/theme-starter...\" --filter \"@nexora/plugin-runtime...\" run build && pnpm --filter @nexora/api run db:generate",
     "build": "pnpm -r run build",
     "dev": "nexora dev",
     "lint": "pnpm run codegen && node --max-old-space-size=6144 node_modules/eslint/bin/eslint.js . --max-warnings=0",

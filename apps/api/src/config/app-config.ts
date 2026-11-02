@@ -80,6 +80,13 @@ export interface AppConfig {
     readonly trashRetentionDays: number;
     readonly revisionLimit: number;
   };
+  readonly plugins: {
+    /** False: no plugin code runs anywhere (an emergency switch). */
+    readonly enabled: boolean;
+    readonly bundledDir: string;
+    /** WebAssembly memory cap per plugin sandbox. */
+    readonly memoryBytes: number;
+  };
 }
 
 export interface SmtpConfig {

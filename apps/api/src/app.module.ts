@@ -17,6 +17,7 @@ import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ContentModule } from './modules/content/content.module.js';
 import { DeliveryModule } from './modules/delivery/delivery.module.js';
+import { ExtensionsModule } from './modules/extensions/extensions.module.js';
 import { JobsModule } from './modules/jobs/jobs.module.js';
 import { MailModule } from './modules/mail/mail.module.js';
 import { MediaModule } from './modules/media/media.module.js';
@@ -67,6 +68,7 @@ export class AppModule {
         RedirectsModule,
         AppearanceModule,
         DeliveryModule,
+        ExtensionsModule,
       ],
       providers: [
         { provide: APP_FILTER, useClass: GlobalExceptionFilter },

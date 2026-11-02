@@ -44,6 +44,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { defineJob } from '../jobs/job-definition.js';
 import { JobRegistry } from '../jobs/job-registry.service.js';
 import { MediaUrls, type StoredVariant } from '../media/media-urls.js';
+import { PluginEventsService } from '../extensions/plugin-events.service.js';
 import { RedirectsService, type PathMove } from '../redirects/redirects.service.js';
 import type { AuthContext } from '../security/auth-context.js';
 import { generateToken, sha256 } from '../security/crypto.js';
@@ -180,6 +181,7 @@ export class EntriesService implements OnModuleInit {
     private readonly redirects: RedirectsService,
     private readonly sites: SiteService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly pluginEvents: PluginEventsService,
   ) {}
 
   onModuleInit(): void {
@@ -339,6 +341,20 @@ export class EntriesService implements OnModuleInit {
           null,
           input.status,
           meta,
+        );
+        await this.pluginEvents.statusChanged(
+          tx,
+          {
+            id: entry.id,
+            siteId: auth.siteId,
+            title: content.title,
+            path,
+            excerpt: content.excerpt,
+            publishedAt,
+            type,
+          },
+          false,
+          input.status === 'published',
         );
         return entry.id;
       }),
@@ -505,6 +521,20 @@ export class EntriesService implements OnModuleInit {
             nextStatus,
             meta,
           );
+          await this.pluginEvents.statusChanged(
+            tx,
+            {
+              id,
+              siteId: auth.siteId,
+              title: content.title,
+              path,
+              excerpt: content.excerpt,
+              publishedAt,
+              type,
+            },
+            current.status === 'published',
+            nextStatus === 'published',
+          );
         }
       }),
     );
@@ -523,6 +553,12 @@ export class EntriesService implements OnModuleInit {
         where: { id },
         data: { trashedAt: new Date(), trashedById: auth.userId, version: { increment: 1 } },
       });
+      await this.pluginEvents.statusChanged(
+        tx,
+        await this.eventSource(tx, id),
+        entry.status === 'published',
+        false,
+      );
       await this.audit.record(tx, {
         action: 'entry.trashed',
         actorUserId: auth.userId,
@@ -547,6 +583,12 @@ export class EntriesService implements OnModuleInit {
         where: { id },
         data: { trashedAt: null, trashedById: null, version: { increment: 1 } },
       });
+      await this.pluginEvents.statusChanged(
+        tx,
+        await this.eventSource(tx, id),
+        false,
+        entry.status === 'published',
+      );
       await this.audit.record(tx, {
         action: 'entry.restored',
         actorUserId: auth.userId,
@@ -763,6 +805,12 @@ export class EntriesService implements OnModuleInit {
         });
         if (updated.count === 1) {
           published += 1;
+          await this.pluginEvents.statusChanged(
+            tx,
+            await this.eventSource(tx, entry.id),
+            false,
+            true,
+          );
           await this.audit.record(tx, {
             action: 'entry.published',
             targetType: 'entry',
@@ -1169,6 +1217,23 @@ export class EntriesService implements OnModuleInit {
        WHERE entry_id = ${entryId}::uuid
          AND id NOT IN (SELECT id FROM entry_revisions WHERE entry_id = ${entryId}::uuid
                          ORDER BY created_at DESC, id DESC LIMIT ${this.config.content.revisionLimit}::integer)`;
+  }
+
+  /** What plugins are told about an entry whose publication changed (public facts only). */
+  private async eventSource(db: DbClient, id: string) {
+    const row = await db.entry.findUniqueOrThrow({
+      where: { id },
+      select: {
+        id: true,
+        siteId: true,
+        title: true,
+        path: true,
+        excerpt: true,
+        publishedAt: true,
+        contentType: { select: { key: true, routePrefix: true, isPublic: true } },
+      },
+    });
+    return { ...row, type: row.contentType };
   }
 
   private async auditTransition(

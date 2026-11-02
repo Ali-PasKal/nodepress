@@ -17,6 +17,8 @@ const KNOWN_DEVELOPMENT_PASSWORDS = new Set([
 
 const DEFAULT_MIGRATIONS_DIR = fileURLToPath(new URL('../../prisma/migrations', import.meta.url));
 const DEFAULT_MEDIA_DIR = fileURLToPath(new URL('../../storage/uploads', import.meta.url));
+/** First-party plugin packages shipped with NEXORA (the repository's plugins/ folder). */
+const DEFAULT_BUNDLED_PLUGINS_DIR = fileURLToPath(new URL('../../../../plugins', import.meta.url));
 
 /** http(s) URL used as a prefix; normalised without a trailing slash. */
 const urlPrefix = z
@@ -215,6 +217,11 @@ export const envSchema = z
     // Content.
     CONTENT_TRASH_RETENTION_DAYS: integer(1, 3650).default(30),
     CONTENT_REVISIONS_LIMIT: integer(1, 1000).default(50),
+
+    // Plugins (sandboxed). PLUGINS_ENABLED=false stops all plugin code: shortcodes stay literal, events are skipped.
+    PLUGINS_ENABLED: booleanFlag.default(true),
+    PLUGINS_BUNDLED_DIR: z.string().min(1).default(DEFAULT_BUNDLED_PLUGINS_DIR),
+    PLUGINS_MEMORY_MB: integer(16, 512).default(64),
     PRISMA_MIGRATIONS_DIR: z.string().min(1).default(DEFAULT_MIGRATIONS_DIR),
   })
   .superRefine((env, ctx) => {
@@ -423,6 +430,11 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
     content: {
       trashRetentionDays: parsed.CONTENT_TRASH_RETENTION_DAYS,
       revisionLimit: parsed.CONTENT_REVISIONS_LIMIT,
+    },
+    plugins: {
+      enabled: parsed.PLUGINS_ENABLED,
+      bundledDir: parsed.PLUGINS_BUNDLED_DIR,
+      memoryBytes: parsed.PLUGINS_MEMORY_MB * 1024 * 1024,
     },
   };
   return deepFreeze(config);

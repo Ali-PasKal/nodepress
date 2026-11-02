@@ -31,6 +31,7 @@
     "@nestjs/core": "12.3.2",
     "@nestjs/platform-express": "12.3.2",
     "@nestjs/swagger": "12.0.5",
+    "@nexora/plugin-runtime": "workspace:*",
     "@nexora/shared": "workspace:*",
     "@nexora/theme-starter": "workspace:*",
     "@node-rs/argon2": "2.2.2",
