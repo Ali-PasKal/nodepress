@@ -1,4 +1,10 @@
-import { parseShortcodes, validateShortcode, type BuilderWidget } from '@nexora/shared';
+import {
+  buildPluginShortcodeAttrsSchema,
+  parseShortcodes,
+  validateShortcode,
+  type BuilderWidget,
+  type PluginShortcodeDefinition,
+} from '@nexora/shared';
 
 export const DEVICE_WIDTHS = { desktop: '100%', tablet: '768px', mobile: '375px' } as const;
 
@@ -35,11 +41,26 @@ export function videoIdFrom(provider: 'youtube' | 'vimeo', input: string): strin
   return match?.[1] ?? value;
 }
 
-/** Problems with shortcodes in a text, as the editor shows them (the site shows such shortcodes literally). */
-export function shortcodeProblems(text: string): string[] {
+/**
+ * Problems with shortcodes in a text, as the editor shows them (the site shows such shortcodes literally).
+ * Shortcodes of active plugins are accepted when their attributes match the plugin's declared types.
+ */
+export function shortcodeProblems(
+  text: string,
+  pluginShortcodes: readonly PluginShortcodeDefinition[] = [],
+): string[] {
   return parseShortcodes(text).flatMap((segment) => {
     if (segment.type !== 'shortcode') return [];
     const result = validateShortcode(segment);
-    return result.ok ? [] : [result.reason];
+    if (result.ok) return [];
+    const plugin = pluginShortcodes.find((definition) => definition.name === segment.name);
+    if (!plugin) return [result.reason];
+    const attrs = buildPluginShortcodeAttrsSchema(plugin).safeParse(segment.attrs);
+    if (attrs.success) return [];
+    const issue = attrs.error.issues[0];
+    const field = issue?.path[0];
+    return [
+      `Invalid ${field === undefined ? 'attributes' : `"${String(field)}"`} for [${segment.name}]${issue ? `: ${issue.message}` : ''}.`,
+    ];
   });
 }

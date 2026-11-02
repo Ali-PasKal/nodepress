@@ -49,6 +49,7 @@ import {
 import { Canvas } from './canvas';
 import { widgetLabel, type DragData } from './labels';
 import { findElement, insertSection, insertWidget, moveSection, moveWidget } from './document-ops';
+import { usePluginShortcodes } from '../plugins/api';
 import { PropertiesPanel } from './properties';
 import { useBuilderStore, useIsDirty } from './store';
 
@@ -178,6 +179,11 @@ function Editor({ entry: initial, typeName }: { entry: EntryDetail; typeName: st
   const [panel, setPanel] = useState<'widgets' | 'navigator'>('widgets');
   const [dragging, setDragging] = useState<string | null>(null);
   const store = useBuilderStore();
+  const pluginShortcodeQuery = usePluginShortcodes();
+  const pluginShortcodes = useMemo(
+    () => pluginShortcodeQuery.data?.items ?? [],
+    [pluginShortcodeQuery.data],
+  );
   const dirty = useIsDirty() || title !== entry.title;
   const skipBlock = useRef(false);
   usePageTitle(`Builder: ${title || typeName}`);
@@ -244,10 +250,11 @@ function Editor({ entry: initial, typeName }: { entry: EntryDetail; typeName: st
         siteName: 'Site',
         language: 'en',
         editing: true,
+        pluginShortcodes: new Set(pluginShortcodes.map((shortcode) => shortcode.name)),
       },
       embedUrl: null,
     }),
-    [media],
+    [media, pluginShortcodes],
   );
 
   const addWidget = (type: BuilderWidget['widget']) => {

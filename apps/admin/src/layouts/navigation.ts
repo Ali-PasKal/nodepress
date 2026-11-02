@@ -11,6 +11,7 @@ import {
   ListTree,
   Newspaper,
   Palette,
+  Puzzle,
   Route,
   ScrollText,
   Search,
@@ -117,6 +118,7 @@ export function buildNavigation(model?: ContentModelResponse): readonly NavGroup
           icon: ListChecks,
           capability: 'jobs.manage',
         },
+        { to: '/plugins', label: 'Plugins', icon: Puzzle, capability: 'plugins.manage' },
         { to: '/audit', label: 'Audit log', icon: ScrollText, capability: 'audit.read' },
         {
           to: '/settings/content-types',

@@ -258,3 +258,77 @@ describe('shortcodes in rich text', () => {
     );
   });
 });
+
+describe('plugin shortcodes', () => {
+  const paragraph = (text: string): RichTextDocument => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+  });
+  const body = (text: string): RichTextDocument => paragraph(text);
+
+  it('renders resolved plugin output inline or as a block, without expanding shortcodes inside it', () => {
+    const inline = renderToStaticMarkup(
+      <RichText
+        document={body('Takes [reading_time] to read.')}
+        shortcodes={{
+          resolved: {
+            'reading_time?': {
+              name: 'plugin',
+              plugin: 'nexora.reading-time',
+              content: paragraph('3 min read [year]'),
+            },
+          },
+          siteName: 'Site',
+          language: 'en',
+        }}
+      />,
+    );
+    expect(inline).toContain(
+      '<p>Takes <span class="nx-plugin-output">3 min read [year]</span> to read.</p>',
+    );
+    const block = renderToStaticMarkup(
+      <RichText
+        document={body('[related_posts]')}
+        shortcodes={{
+          resolved: {
+            'related_posts?': {
+              name: 'plugin',
+              plugin: 'nexora.related-posts',
+              content: {
+                type: 'doc',
+                content: [
+                  {
+                    type: 'heading',
+                    attrs: { level: 3 },
+                    content: [{ type: 'text', text: 'More' }],
+                  },
+                  paragraph('One').content[0]!,
+                ],
+              },
+            },
+          },
+          siteName: 'Site',
+          language: 'en',
+        }}
+      />,
+    );
+    // A block result inside a paragraph is wrapped in a div (no <div> inside <p>).
+    expect(block).toContain(
+      '<div class="nx-p"><div class="nx-plugin-output"><h3>More</h3><p>One</p></div></div>',
+    );
+  });
+
+  it('keeps unresolved plugin shortcodes literal on the site and shows placeholders in the editor', () => {
+    const context = { resolved: {}, siteName: 'Site', language: 'en' };
+    expect(
+      renderToStaticMarkup(<RichText document={body('[reading_time]')} shortcodes={context} />),
+    ).toContain('<p>[reading_time]</p>');
+    const editing = renderToStaticMarkup(
+      <RichText
+        document={body('[reading_time]')}
+        shortcodes={{ ...context, editing: true, pluginShortcodes: new Set(['reading_time']) }}
+      />,
+    );
+    expect(editing).toContain('[reading_time] from a plugin (shown on the site)');
+  });
+});

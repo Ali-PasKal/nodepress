@@ -203,6 +203,34 @@ export const adminRoutes: RouteObject[] = [
         },
       },
       {
+        path: 'plugins',
+        handle: handle(['System', 'Plugins']),
+        lazy: async () => {
+          const { PluginsPage } = await import('../features/plugins/plugins-page');
+          return {
+            element: (
+              <RequireCapability capability="plugins.manage">
+                <PluginsPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
+        path: 'plugins/:key',
+        handle: handle(['System', 'Plugins', 'Plugin']),
+        lazy: async () => {
+          const { PluginDetailPage } = await import('../features/plugins/plugin-detail-page');
+          return {
+            element: (
+              <RequireCapability capability="plugins.manage">
+                <PluginDetailPage />
+              </RequireCapability>
+            ),
+          };
+        },
+      },
+      {
         path: 'system/jobs',
         handle: handle(['System', 'Background jobs']),
         lazy: async () => {

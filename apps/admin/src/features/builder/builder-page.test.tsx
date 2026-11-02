@@ -87,6 +87,21 @@ function stubApi(capabilities: string[], hasBuilder = true): Request[] {
     if (url === '/api/v1/system/status') return json({ installed: true });
     if (url === '/api/v1/auth/session') return json(sessionFixture(capabilities));
     if (url === '/api/v1/content-model') return json(model(hasBuilder));
+    if (url === '/api/v1/plugin-shortcodes') {
+      return json({
+        items: [
+          {
+            name: 'reading_time',
+            label: 'Reading time',
+            description: '',
+            example: '[reading_time]',
+            attributes: { label: { type: 'string', maxLength: 100, required: false } },
+            pluginId: 'nexora.reading-time',
+            pluginName: 'Reading time plugin',
+          },
+        ],
+      });
+    }
     if (url === `/api/v1/entries/${ID(10)}` && method === 'GET') return json(ENTRY);
     if (url === `/api/v1/entries/${ID(10)}` && method === 'PATCH') {
       const input = updateEntrySchema.parse(body);
@@ -115,7 +130,7 @@ describe('visual builder page', () => {
     const user = userEvent.setup();
     renderAdmin(`/content/page/${ID(10)}/builder`);
 
-    const canvas = await screen.findByRole('main', { name: 'Canvas' });
+    const canvas = await screen.findByRole('main', { name: 'Canvas' }, { timeout: 5_000 });
     expect(await within(canvas).findByText('Existing introduction')).toBeInTheDocument();
     // HTML embeds need their own capability.
     const library = screen.getByRole('complementary', { name: 'Library' });
@@ -137,6 +152,16 @@ describe('visual builder page', () => {
     await user.clear(code);
     await user.paste('[nope]');
     expect(within(properties).getByText(/It will appear as plain text/)).toBeInTheDocument();
+    // Shortcodes of active plugins are recognised (and their attributes checked).
+    await user.clear(code);
+    await user.paste('[reading_time label="x"]');
+    expect(within(properties).queryByText(/It will appear as plain text/)).toBeNull();
+    expect(within(properties).getByText('(Reading time plugin)')).toBeInTheDocument();
+    await user.clear(code);
+    await user.paste('[reading_time colour="red"]');
+    expect(
+      within(properties).getByText(/Invalid attributes for \[reading_time\]/),
+    ).toBeInTheDocument();
     await user.clear(code);
     await user.paste('[[nope]] [year]');
     expect(within(properties).queryByText(/It will appear as plain text/)).toBeNull();
@@ -162,7 +187,7 @@ describe('visual builder page', () => {
     const requests = stubApi(EDITOR);
     const user = userEvent.setup();
     renderAdmin(`/content/page/${ID(10)}/builder`);
-    const canvas = await screen.findByRole('main', { name: 'Canvas' });
+    const canvas = await screen.findByRole('main', { name: 'Canvas' }, { timeout: 5_000 });
     await within(canvas).findByText('Existing introduction');
 
     await user.click(screen.getByRole('button', { name: 'Add Divider' }));

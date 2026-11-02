@@ -84,10 +84,11 @@ function renderNode(
   switch (node.type) {
     case 'paragraph': {
       // Block-level shortcodes (lists, galleries, videos) cannot live inside <p>.
+      const shortcodes = options.shortcodes;
       const block =
-        options.shortcodes !== undefined &&
+        shortcodes !== undefined &&
         (node.content ?? []).some(
-          (child) => child.type === 'text' && hasBlockShortcode(child.text),
+          (child) => child.type === 'text' && hasBlockShortcode(child.text, shortcodes),
         );
       return block ? (
         <div key={key} className="nx-p">
@@ -161,6 +162,30 @@ function renderNode(
     }
   }
   return null;
+}
+
+const PLAIN: RenderOptions = { media: {}, imageSizes: '100vw', shortcodes: undefined };
+
+/** Whether plugin output needs a block container (anything but a single paragraph). */
+export function isBlockOutput(document: RichTextDocument): boolean {
+  return document.content.length > 1 || document.content.some((node) => node.type !== 'paragraph');
+}
+
+/**
+ * Output of a plugin shortcode (rich text that passed the allowlist on the server). Shortcodes inside it are
+ * never expanded, so a plugin cannot trigger other shortcodes. A single paragraph renders inline.
+ */
+export function PluginShortcodeOutput({ document }: { document: RichTextDocument }) {
+  const [first] = document.content;
+  if (!first) return null;
+  if (!isBlockOutput(document) && first.type === 'paragraph') {
+    return <span className="nx-plugin-output">{renderChildren(first.content, 'p', PLAIN)}</span>;
+  }
+  return (
+    <div className="nx-plugin-output">
+      {document.content.map((node, index) => renderNode(node, String(index), PLAIN))}
+    </div>
+  );
 }
 
 export interface RichTextProps {

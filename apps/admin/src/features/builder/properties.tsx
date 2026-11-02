@@ -24,6 +24,7 @@ import {
 import { ArrowDown, ArrowUp, Copy, Trash2 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { MediaPickerDialog } from '../media/media-picker-dialog';
+import { usePluginShortcodes } from '../plugins/api';
 import { RichTextEditor } from '../content/rich-text-editor';
 import { shortcodeProblems, videoIdFrom, widgetLabel } from './labels';
 import {
@@ -421,6 +422,9 @@ function WidgetProps({
   onMedia: (item: MediaItem) => void;
 }) {
   const apply = useBuilderStore((state) => state.apply);
+  const pluginShortcodes =
+    usePluginShortcodes(widget.widget === 'shortcode' || widget.widget === 'text').data?.items ??
+    [];
   const update = (patch: Record<string, unknown>) => {
     apply(
       (document) =>
@@ -470,7 +474,9 @@ function WidgetProps({
       );
       break;
     case 'text': {
-      const problems = shortcodeTexts(widget.props.content, null).flatMap(shortcodeProblems);
+      const problems = shortcodeTexts(widget.props.content, null).flatMap((text) =>
+        shortcodeProblems(text, pluginShortcodes),
+      );
       fields = (
         <>
           <RichTextEditor
@@ -718,7 +724,7 @@ function WidgetProps({
       );
       break;
     case 'shortcode': {
-      const problems = shortcodeProblems(widget.props.code);
+      const problems = shortcodeProblems(widget.props.code, pluginShortcodes);
       fields = (
         <>
           <TextProp
@@ -741,6 +747,12 @@ function WidgetProps({
               {Object.entries(shortcodeRegistry).map(([name, definition]) => (
                 <li key={name}>
                   <code>{definition.example}</code> — {definition.label}
+                </li>
+              ))}
+              {pluginShortcodes.map((definition) => (
+                <li key={`plugin:${definition.name}`}>
+                  <code>{definition.example || `[${definition.name}]`}</code> — {definition.label}{' '}
+                  <span className="italic">({definition.pluginName})</span>
                 </li>
               ))}
             </ul>

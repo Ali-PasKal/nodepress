@@ -1,5 +1,6 @@
 import {
   parseShortcodes,
+  shortcodeKey,
   validateShortcode,
   type ResolvedShortcode,
   type ShortcodeToken,
@@ -7,6 +8,7 @@ import {
 import { Fragment, type ReactNode } from 'react';
 import { formatDate, linkAttributes } from './helpers.js';
 import { ResponsiveImage } from './image.js';
+import { isBlockOutput, PluginShortcodeOutput } from './rich-text.js';
 
 /** What shortcodes need at render time: data resolved by the API plus a little site context. */
 export interface ShortcodeContext {
@@ -17,6 +19,8 @@ export interface ShortcodeContext {
   readonly now?: Date;
   /** Editor canvas: show placeholders for videos and for data that is only resolved on the site. */
   readonly editing?: boolean;
+  /** Editor canvas: names of shortcodes offered by active plugins (shown as placeholders). */
+  readonly pluginShortcodes?: ReadonlySet<string>;
 }
 
 /** Labelled box the editor canvas shows instead of third-party frames or server-resolved data. */
@@ -31,13 +35,13 @@ export function EditPlaceholder({ label }: { label: string }) {
 /** Shortcodes that render block content; a paragraph containing one is rendered as a <div>. */
 const BLOCK_SHORTCODES = new Set(['recent_posts', 'gallery', 'video']);
 
-export function hasBlockShortcode(text: string): boolean {
-  return parseShortcodes(text).some(
-    (segment) =>
-      segment.type === 'shortcode' &&
-      BLOCK_SHORTCODES.has(segment.name) &&
-      validateShortcode(segment).ok,
-  );
+export function hasBlockShortcode(text: string, context?: ShortcodeContext): boolean {
+  return parseShortcodes(text).some((segment) => {
+    if (segment.type !== 'shortcode') return false;
+    if (BLOCK_SHORTCODES.has(segment.name) && validateShortcode(segment).ok) return true;
+    const plugin = context?.resolved[shortcodeKey(segment)];
+    return plugin?.name === 'plugin' && isBlockOutput(plugin.content);
+  });
 }
 
 export function VideoFrame({
@@ -79,7 +83,15 @@ export function Shortcode({
   context: ShortcodeContext;
 }): ReactNode {
   const result = validateShortcode(token);
-  if (!result.ok) return token.raw;
+  if (!result.ok) {
+    // Not a core shortcode: a plugin's (resolved by the API), a placeholder in the editor, or literal text.
+    const plugin = context.resolved[shortcodeKey(token)];
+    if (plugin?.name === 'plugin') return <PluginShortcodeOutput document={plugin.content} />;
+    if (context.editing && context.pluginShortcodes?.has(token.name)) {
+      return <EditPlaceholder label={`[${token.name}] from a plugin (shown on the site)`} />;
+    }
+    return token.raw;
+  }
   const shortcode = result.value;
   switch (shortcode.name) {
     case 'site_name':
