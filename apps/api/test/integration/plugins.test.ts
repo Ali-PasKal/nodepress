@@ -358,8 +358,14 @@ describe('plugins', () => {
     const runtime = testApp.app.get(PluginRuntimeService);
     const sandboxes = Reflect.get(runtime, 'sandboxes') as Map<
       string,
-      { process: { pid?: number } }
+      { process: { pid?: number; running: boolean } }
     >;
+    const pluginId = await withDb(async (db) => {
+      const result = await db.query<{ id: string }>(
+        `SELECT id FROM plugins WHERE key = 'acme.demo'`,
+      );
+      return result.rows[0]?.id ?? '';
+    });
     const post = await createEntry(owner, {
       title: 'Crash test',
       status: 'published',
@@ -371,15 +377,22 @@ describe('plugins', () => {
         body: paragraphDoc(`[hello name="Crash${String(round)}"]`),
       });
       await delivered(post.url ?? '');
-      const sandbox = [...sandboxes.values()][0];
-      process.kill(sandbox?.process.pid ?? 0, 'SIGKILL');
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const sandbox = sandboxes.get(pluginId);
+      const pid = sandbox?.process.pid;
+      if (!sandbox || pid === undefined) throw new Error('The plugin has no running sandbox.');
+      process.kill(pid, 'SIGKILL');
+      // The runtime has seen the crash once the process no longer counts as running.
+      await eventually(() => !sandbox.process.running);
     }
-    const detail = pluginDetailSchema.parse(
-      (await admin.agent.get('/api/v1/plugins/acme.demo').expect(200)).body,
-    );
-    expect(detail.status).toBe('failed');
-    expect(detail.error).toMatch(/Stopped after 3 crashes/);
+    // Marking the plugin as failed is written asynchronously after the third crash.
+    let detail: PluginDetail | undefined;
+    await eventually(async () => {
+      detail = pluginDetailSchema.parse(
+        (await admin.agent.get('/api/v1/plugins/acme.demo').expect(200)).body,
+      );
+      return detail.status === 'failed';
+    });
+    expect(detail?.error).toMatch(/Stopped after 3 crashes/);
   });
 
   it('uninstalls only inactive plugins, removing storage and logs', async () => {
@@ -423,6 +436,19 @@ describe('plugins', () => {
     expect(plainText(await delivered(post2.url ?? ''), 'greet?')).toContain('Hi from bundled');
     await post(admin, '/api/v1/plugins/bundled/nexora.missing', {}, 404);
   });
+
+  /** Polls `check` until it holds (slow CI runners), failing after `timeoutMs`. */
+  async function eventually(
+    check: () => boolean | Promise<boolean>,
+    timeoutMs = 10_000,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!(await check())) {
+      if (Date.now() > deadline)
+        throw new Error(`Condition not met within ${String(timeoutMs)} ms.`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
 
   async function refreshed(id: string) {
     const response = await owner.agent.get(`/api/v1/entries/${id}`).expect(200);
