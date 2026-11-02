@@ -137,6 +137,8 @@ export type DeliveryField = z.infer<typeof deliveryFieldSchema>;
 export const resolvedShortcodeSchema = z.discriminatedUnion('name', [
   z.object({ name: z.literal('recent_posts'), items: z.array(deliveryEntryCardSchema) }),
   z.object({ name: z.literal('gallery'), media: z.array(deliveryMediaSchema) }),
+  /** Output of a plugin shortcode: rich text that passed the allowlist (rendered without expanding shortcodes). */
+  z.object({ name: z.literal('plugin'), plugin: z.string(), content: richTextDocumentSchema }),
 ]);
 export type ResolvedShortcode = z.infer<typeof resolvedShortcodeSchema>;
 

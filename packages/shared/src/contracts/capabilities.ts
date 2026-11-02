@@ -56,6 +56,10 @@ export const CORE_CAPABILITIES = {
     description: 'Choose and configure the theme, site identity, reading settings and menus',
   },
   'seo.manage': { category: 'appearance', description: 'Manage SEO settings and redirects' },
+  'plugins.manage': {
+    category: 'system',
+    description: 'Install, activate, configure, update and remove plugins (they run sandboxed)',
+  },
 } as const satisfies Record<string, { category: string; description: string }>;
 
 export type CoreCapability = keyof typeof CORE_CAPABILITIES;

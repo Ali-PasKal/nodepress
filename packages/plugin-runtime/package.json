@@ -1,0 +1,38 @@
+{
+  "name": "@nexora/plugin-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plugin packages and the sandbox that runs plugin code (QuickJS in WebAssembly, one child process per plugin)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine.d.ts",
+      "import": "./dist/engine.js"
+    },
+    "./host": "./dist/host.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run build && vitest run"
+  },
+  "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "@nexora/shared": "workspace:*",
+    "quickjs-emscripten-core": "0.32.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  }
+}
