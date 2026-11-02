@@ -671,7 +671,8 @@ application. ADR 0005 had decided that third-party code runs in explicit trust t
   rule refused every public IPv4 address — found by a unit test, fixed with one list per family; the edge nginx
   limited request bodies to 1 MB, below the 2 MB package limit — a location for `/api/v1/plugins` was added; the
   plugin settings form remounted when the plugin changed, losing input (found by E2E); Vitest's shared module cache
-  could be cleared by one process while another used it — one cache per package now.
+  could be cleared by one process while another used it — one cache per package now; the admin image type-checks the
+  E2E specs, and a spec importing the plugin runtime broke the image build — the specs now write their own ZIPs.
 
 ### Acceptance criteria and results
 
@@ -685,7 +686,7 @@ application. ADR 0005 had decided that third-party code runs in explicit trust t
 | 6 | Events delivered at least once through the job queue with public data | ✅ API `plugins.test.ts` (no event for drafts; published with absolute URL; unpublished on trash); first-party plugin tests |
 | 7 | SDK harness and `nexora plugin pack` work; first-party plugins tested | ✅ SDK tests (pack round trip, harness enforcing permissions, hosts and output), CLI tests (check, pack, errors), plugin tests (7) |
 | 8 | Admin plugins UI accessible and responsive; E2E covers install → activate → shortcode on the site | ✅ admin `plugins-ui.test.tsx` (list, bundled install, exact grants, secrets kept unless replaced, server field errors, README as text, navigation by capability); E2E `plugins.spec.ts` on 1280/768/375 px |
-| 9 | All checks on Node 22 and 23.7; CI green | CI result recorded after the push |
+| 9 | All checks on Node 22 and 23.7; CI green | ✅ local (below); CI: see the note under "Known limitations" |
 
 ### Verification run (2026-11-02)
 
@@ -698,9 +699,9 @@ Local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.
 | `pnpm run test` (with Redis and S3) | exit 0 — shared 66 · ui 7 · cli 23 · theme-sdk 10 · theme-starter 7 · plugin-runtime 21 · plugin-sdk 4 · first-party plugins 7 · site-runtime 16 · admin 88 · api 267 (**516 passed**) |
 | `pnpm --filter @nexora/api run db:check-drift` | "No difference detected." |
 | `pnpm audit --prod` | "No known vulnerabilities found" (new runtime dependencies: `quickjs-emscripten-core` 0.32.0, `@jitl/quickjs-wasmfile-release-sync` 0.32.0, both MIT, no install scripts) |
-| `pnpm run test:e2e` | run in progress at the time of this commit; result recorded in a follow-up commit |
-| Node 23.7.0, fresh copy of the tracked files (`git ls-files`): install, `typecheck`, `build`, `test` | pending; recorded in a follow-up commit |
-| `docker compose --profile app up` (production mode, rebuilt images) | pending; recorded in a follow-up commit |
+| `pnpm run test:e2e` | exit 0 — **115 passed** (setup + 38 × 3 viewports; new: plugin install/upload/review/settings/site/deactivate and invalid packages); plugins spec re-run after the last change: 7 passed |
+| Node 23.7.0, fresh copy of the tracked files (`git ls-files`): install, `typecheck`, `build`, `test` | install, build and test exit 0 (516 tests); the first copy's `typecheck` failed on the per-package Vitest cache path (`URL.pathname` in a package without Node typings) — fixed, and a fresh copy of the fix passed install, `typecheck` and `build` |
+| `docker compose --profile app up` (production mode, rebuilt images) | all services healthy; through nginx: setup → Reading time installed and activated from the admin → a 1.33 MB package (incompressible padding) uploaded through the new nginx location, reviewed and activated → post with `[compose_greet]`, `[reading_time]` and an unknown shortcode: plugin output rendered (italic text from the sandbox, "1 min read"), the unknown shortcode literal, 0 CSP violations. Inside the API container the sandbox processes run as `node` with `--permission` and the four read paths, and their environment holds only Node's IPC channel variables (the API process has `DATABASE_URL`). Image sizes: api 843 MB, site 269 MB, admin 84 MB |
 
 ### Known limitations and caveats (honest list)
 
@@ -721,6 +722,12 @@ Local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.
   web APIs (e.g. `URL`), which authors must replace.
 - **Hierarchical content** (child pages) is not returned by `content:read` (their ancestors would need checking).
 - The admin's initial bundle is at 214.6 of 215 kB; the next additions to the shell need trimming elsewhere.
+- **GitHub CI:** run #24 (commit `39c4908`, the M6 push) failed in lint/typecheck — `URL.pathname` in the shared
+  package's Vitest config, which has no Node typings (my local typecheck had run before that change) — and in the
+  admin image (the E2E spec imported the plugin runtime, which the admin image does not contain). Run #25 (commit
+  `071e4a1`) fixed the first: lint/format/typecheck/build/bundle budget, unit + integration + drift + E2E, Node 23.7.0
+  and 24, and the audit were green; only the admin image failed. Commit `daf2212` fixes the image build (verified
+  locally: all four images build); its CI result is recorded below.
 
 ### Security considerations for M6
 The sandbox design, capabilities, SSRF guard and package reader are described in
