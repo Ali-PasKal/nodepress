@@ -727,7 +727,14 @@ Local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.
   admin image (the E2E spec imported the plugin runtime, which the admin image does not contain). Run #25 (commit
   `071e4a1`) fixed the first: lint/format/typecheck/build/bundle budget, unit + integration + drift + E2E, Node 23.7.0
   and 24, and the audit were green; only the admin image failed. Commit `daf2212` fixes the image build (verified
-  locally: all four images build); its CI result is recorded below.
+  locally: all four images build); its run #26 was cancelled by the next push. Run #27 (commit `270b34a`) was green
+  except the Node.js 23.7.0 job: the integration test for "failed after repeated sandbox crashes" slept a fixed
+  300 ms after each kill, and on the slower runner the asynchronous "failed" update had not landed yet (it had
+  passed in run #25 and locally). Commit `31dd981` makes the test wait for state (it kills the plugin's own
+  sandbox by id, waits until the runtime has seen each exit and polls the status; verified three times under full
+  CPU load). **Run #28 (commit `31dd981`) is green in all six jobs**: lint/format/typecheck/build/bundle budget,
+  unit + integration + migration drift + E2E (desktop, tablet, mobile), Node.js 23.7.0, Node.js 24, dependency audit
+  and the container images with the Compose check.
 
 ### Security considerations for M6
 The sandbox design, capabilities, SSRF guard and package reader are described in
