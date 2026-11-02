@@ -1,4 +1,3 @@
-import { writePluginPackage } from '@nexora/plugin-runtime';
 import type { Page } from '@playwright/test';
 import {
   apiAsUser,
@@ -9,6 +8,7 @@ import {
   signIn,
   test,
 } from './helpers';
+import { zip as writePluginPackage } from './zip';
 
 function suffix(page: Page): string {
   return String(page.viewportSize()?.width ?? 0);
