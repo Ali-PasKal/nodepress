@@ -10,7 +10,7 @@ results that were actually observed.
 | **M3** | Pages, posts, content types, taxonomies, revisions, media library, job queue | **Complete** (see results and caveats below) |
 | **M4** | Theme engine, public site runtime, starter theme, templates, SEO fundamentals, Delivery API | **Complete** (see results and caveats below) |
 | **M5** | Visual builder: document schema, widgets, canvas, drag and drop, undo/redo, responsive styles; shortcodes; sandboxed HTML embeds | **Complete** (see results and caveats below) |
-| M6 | Plugin SDK, lifecycle, extension permissions, example and default plugins | Not started |
+| **M6** | Plugins: sandboxed runtime, lifecycle and permissions, shortcodes and events, SDK, first-party plugins | **Complete** (see results and caveats below) |
 | M7 | Additional themes, forms, WordPress import, performance | Not started |
 | M8 | E2E coverage, security review, backup restore testing, deployment hardening, release | Not started |
 
@@ -622,17 +622,125 @@ R-23…R-25 are listed in [`docs/security/threat-model.md`](../security/threat-m
 
 ---
 
-## Next: Milestone 6 — Plugins
+## Milestone 6 — Plugins
+
+Plan, scope and decisions: [`docs/milestones/m6-plugins.md`](../milestones/m6-plugins.md). Developer guide:
+[`docs/plugins/README.md`](../plugins/README.md).
+
+### Starting point
+M5 delivered the visual builder and a fixed set of shortcodes; everything a site could do was compiled into the
+application. ADR 0005 had decided that third-party code runs in explicit trust tiers and never in the API process.
+
+### What was built
+- **Sandbox** (`packages/plugin-runtime`): plugin code runs in QuickJS compiled to WebAssembly — no Node.js APIs,
+  only the `ctx` object built by a small trusted bootstrap — with a fresh runtime and context per call, an engine
+  deadline, a stack limit and a hard cap on the WebAssembly memory. Each active plugin has its own child process,
+  started with an empty environment and Node's permission model (reads only from the engine's packages; no writes,
+  child processes, workers, addons or string code generation). The parent validates every message, kills a child
+  that overruns a call, restarts it on demand and marks a plugin as failed after three crashes in ten minutes.
+  Prototyping showed why each layer is needed: QuickJS's memory accounting did not stop a ~1.5 GB allocation in
+  this build (the WebAssembly cap does, in ~0.1 s), its interrupt is rarely checked inside long native operations
+  (the watchdog covers that), and a too-large stack limit crashed the process (now caught as an error).
+- **Packages**: a `.zip` with `nexora-plugin.json` and one ES module (plus README/licence), read by a strict ZIP
+  reader (central directory only, no encryption/ZIP64/multi-disk, limits before inflating, inflate capped at the
+  declared size, CRC checks) and stored in the database. Manifest: id, semantic version, plugin API version,
+  permissions and hosts, typed settings, shortcodes with typed attributes, hooks.
+- **API** (`modules/extensions`, migration `plugins`, `plugin_storage`, `plugin_logs`, capability `plugins.manage`
+  for administrators): install from upload or the bundled `plugins/` folder (inactive), activate (grants exactly the
+  manifest's permissions and hosts after loading the code in a throwaway sandbox and checking every declared handler
+  is exported; shortcode names must not collide), deactivate, update (stays active only if it asks for nothing new),
+  settings (secrets never returned), uninstall, logs — all audited; `PLUGINS_ENABLED` switch.
+- **Capabilities** for sandboxed code: private storage (16 KB per value, 1,000 keys, 1 MB), logging, `content:read`
+  (published content through the public visibility rules) and `http:fetch` through an **SSRF guard** (approved exact
+  hosts, HTTPS on 443, every DNS answer checked against private/reserved ranges, connection pinned to the checked
+  address, no redirects, header/size/time limits, 60 requests per minute).
+- **Extension points**: plugin shortcodes resolved by the Delivery API (attributes validated against the manifest,
+  0.5 s per call, 10 per entry, 2 s per page, 30 s cache; output must be text or allowlisted rich text; themes render
+  it without expanding shortcodes inside; inactive plugins' shortcodes stay literal), and `entry.published` /
+  `entry.unpublished` events enqueued in the transaction of the change (create, update, trash, restore, scheduled
+  publishing) and delivered by the job worker with absolute public URLs, at least once.
+- **Admin**: Plugins page (installed, first-party plugins to install/update, upload), permission review that sends
+  exactly the permissions shown, plugin page (permissions, shortcodes, generated settings form, recent log, README as
+  plain text, deactivate, uninstall); the builder recognises active plugin shortcodes (attributes checked) and shows
+  placeholders for them.
+- **SDK** (`packages/plugin-sdk`): types, `definePlugin`, packing, and a test harness that runs plugins in the real
+  engine with the core's validation and permission rules; `nexora plugin check|pack` and `nexora-plugin`.
+- **First-party plugins** (sandboxed like any other): Reading time (`[reading_time]`), Related posts
+  (`[related_posts]`, `content:read`), Publish notifications (Slack/Discord on publish, `http:fetch` to those hosts).
+- **Fixes found on the way**: Node's `BlockList` matches IPv4 addresses against IPv6 rules, so the `::ffff:0:0/96`
+  rule refused every public IPv4 address — found by a unit test, fixed with one list per family; the edge nginx
+  limited request bodies to 1 MB, below the 2 MB package limit — a location for `/api/v1/plugins` was added; the
+  plugin settings form remounted when the plugin changed, losing input (found by E2E); Vitest's shared module cache
+  could be cleared by one process while another used it — one cache per package now.
+
+### Acceptance criteria and results
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Packages validated; malformed, oversized and hostile archives rejected with clear errors | ✅ runtime `package.test.ts` (not a zip, truncated, tampered, zip bomb stopped at the inflate cap with 0.1 MB growth, too large/many entries, encrypted, ZIP64, unsupported compression, unsafe and duplicate names, invalid manifests with field paths, invalid UTF-8); shared `plugins.test.ts`; API (422 with issues); E2E |
+| 2 | Plugin code only in the sandbox: no Node APIs, files, network, environment or other plugins; loops, memory, recursion, huge outputs stopped; crashes mark the plugin failed | ✅ runtime `engine.test.ts` (no host globals or imports, no state between calls, loop, recursion, memory and string bombs, waiting past the deadline, result size), `process.test.ts` (confinement probe with the sandbox flags: empty environment, `/etc` and repository reads denied, spawning and writes denied, no eval; watchdog kill and fresh process; crash restart); API `plugins.test.ts` (three crashes → failed) |
+| 3 | Capabilities enforced: refused without grants; quotas, rate limits and the SSRF guard work | ✅ API `plugins.test.ts` (content:read and http:fetch refused until granted, storage value limit, unapproved hosts, plain HTTP, other ports and IP literals refused), `safe-fetch.test.ts` (private, loopback, link-local, metadata, mapped and reserved addresses, mixed DNS answers, headers, methods, body size; pinned connection, no redirects, response cap, timeout) |
+| 4 | Lifecycle with permission approval, updates with re-approval, uninstall, rollback, audit, `plugins.manage` only | ✅ API `plugins.test.ts` (403 for editors, activation only with the exact grants, missing handlers refused, updates keep or drop activation, downgrades refused, uninstall only when inactive and removes storage/logs, audit trail, `PLUGINS_ENABLED=false`) |
+| 5 | Plugin shortcodes render from validated rich text with limits; inactive ones literal; editor recognises active ones | ✅ API `plugins.test.ts` (rich text with settings, storage and entry context; unsafe output → nothing; invalid attributes → literal; inactive → literal; bundled Reading time and Related posts end to end), theme-sdk tests (inline/block, no nested expansion, placeholders), admin `builder-page.test.tsx`; E2E on three viewports with 0 CSP violations |
+| 6 | Events delivered at least once through the job queue with public data | ✅ API `plugins.test.ts` (no event for drafts; published with absolute URL; unpublished on trash); first-party plugin tests |
+| 7 | SDK harness and `nexora plugin pack` work; first-party plugins tested | ✅ SDK tests (pack round trip, harness enforcing permissions, hosts and output), CLI tests (check, pack, errors), plugin tests (7) |
+| 8 | Admin plugins UI accessible and responsive; E2E covers install → activate → shortcode on the site | ✅ admin `plugins-ui.test.tsx` (list, bundled install, exact grants, secrets kept unless replaced, server field errors, README as text, navigation by capability); E2E `plugins.spec.ts` on 1280/768/375 px |
+| 9 | All checks on Node 22 and 23.7; CI green | CI result recorded after the push |
+
+### Verification run (2026-11-02)
+
+Local container: Node 22.23.4, pnpm 10.28.0, PostgreSQL 16, Redis 7, s3mock 4.6.0, Docker 29.
+
+| Command | Result |
+|---|---|
+| `pnpm run lint` / `format:check` / `typecheck` / `build` | all exit 0 |
+| `pnpm --filter @nexora/admin run size` | exit 0 — initial JS 214.6 kB gzip (budget 215 kB, little headroom left), CSS 9.5 kB (budget 12 kB); the plugin pages are lazy chunks |
+| `pnpm run test` (with Redis and S3) | exit 0 — shared 66 · ui 7 · cli 23 · theme-sdk 10 · theme-starter 7 · plugin-runtime 21 · plugin-sdk 4 · first-party plugins 7 · site-runtime 16 · admin 88 · api 267 (**516 passed**) |
+| `pnpm --filter @nexora/api run db:check-drift` | "No difference detected." |
+| `pnpm audit --prod` | "No known vulnerabilities found" (new runtime dependencies: `quickjs-emscripten-core` 0.32.0, `@jitl/quickjs-wasmfile-release-sync` 0.32.0, both MIT, no install scripts) |
+| `pnpm run test:e2e` | run in progress at the time of this commit; result recorded in a follow-up commit |
+| Node 23.7.0, fresh copy of the tracked files (`git ls-files`): install, `typecheck`, `build`, `test` | pending; recorded in a follow-up commit |
+| `docker compose --profile app up` (production mode, rebuilt images) | pending; recorded in a follow-up commit |
+
+### Known limitations and caveats (honest list)
+
+- **Sandbox strength:** an escape would need bugs in both QuickJS and V8's WebAssembly sandbox; the child would then
+  have no secrets, database access or writable files, but **could open network connections** (Node's permission
+  model in the supported versions does not cover the network). Restrict egress at the network level where that
+  matters (R-26).
+- **What plugins can do is deliberately small:** shortcodes and two events; no admin pages of their own, builder
+  widgets, routes, write access to content, scheduled tasks, or access to users and settings. No marketplace,
+  signatures or automatic updates. No trusted in-process plugins.
+- **Within its grants a plugin decides what its shortcodes show** (allowlisted text and links) and what it sends to
+  approved hosts (public content, its own settings) (R-27).
+- **Performance:** each plugin shortcode call costs a round trip to the plugin's process (results cached 30 s per
+  API process); an active plugin keeps a process of a few tens of MB while in use (stopped after 10 minutes idle);
+  limits apply per API/worker process (rate limits are per process) (R-28).
+- **Secrets in plugin settings** are stored unencrypted in the database (never returned by the API) (R-29).
+- **Plugin code must be one bundled ES module** without imports, timers or browser/Node APIs; QuickJS lacks some
+  web APIs (e.g. `URL`), which authors must replace.
+- **Hierarchical content** (child pages) is not returned by `content:read` (their ancestors would need checking).
+- The admin's initial bundle is at 214.6 of 215 kB; the next additions to the shell need trimming elsewhere.
+
+### Security considerations for M6
+The sandbox design, capabilities, SSRF guard and package reader are described in
+[`docs/security/threat-model.md`](../security/threat-model.md) (§3.4, §5.4, control inventory) with residual risks
+R-26…R-29; R-02 (trusted plugins) no longer applies.
+
+---
+
+## Next: Milestone 7 — Themes, forms, import and performance
 
 Planned scope (to be confirmed at milestone start):
 
-1. Plugin manifest and SDK (`packages/plugin-sdk`) with versioned contracts and a test harness.
-2. Lifecycle (install, activate, deactivate, update, uninstall) with migrations per plugin and an audit trail.
-3. Trust tiers: declarative extensions validated by core; sandboxed code in an isolated process with
-   capability-checked RPC; trusted in-process code only with explicit administrator approval.
-4. Extension points: widgets and shortcodes for the builder (the registries were designed for it), admin pages in
-   sandboxed iframes, hooks on content events, scheduled jobs.
-5. Example and default plugins.
+1. A second theme and theme packaging (declarative templates where possible, so that third-party themes need less
+   trust).
+2. Forms (builder widget and shortcode) with server-side validation, spam protection (honeypot, rate limits),
+   submissions with retention and export, and notifications.
+3. WordPress import (WXR): posts, pages, categories, tags, media, with a preview and a background job; shortcodes
+   kept as text where NEXORA has no equivalent.
+4. Performance: HTML caching for public pages, cache invalidation on publish, edge rate limiting guidance; admin
+   bundle headroom.
 
-Risks to address early: isolation guarantees and their honest presentation in the UI, capability design,
-dependency and update supply chain, performance of hooks on hot paths.
+Risks to address early: XML parsing of untrusted imports (entity expansion, size), media download from remote hosts
+(SSRF guard reuse), spam and abuse of public forms, cache correctness for previews and drafts.

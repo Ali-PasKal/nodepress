@@ -111,3 +111,7 @@ and never in the API process.
    installing and activating a plugin whose shortcode then appears on the site.
 9. All checks (lint, format, typecheck, build, bundle budget, unit/integration, E2E, drift, audit) pass on
    Node 22 and 23.7; CI green.
+
+## Results
+All nine criteria are met; evidence, the verification run, known limitations and the security notes are in
+[`docs/status/PROJECT_STATUS.md`](../status/PROJECT_STATUS.md#milestone-6--plugins).
